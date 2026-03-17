@@ -4,6 +4,20 @@ import { CreateDraftArticleInput, CreateDraftArticleResult, SapoBlog } from "../
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
+type ArticlePayload = {
+  article: {
+    title: string;
+    published_on: null;
+    content?: string;
+    body_html?: string;
+    image?: {
+      base64?: string;
+      attachment?: string;
+      filename?: string;
+    };
+  };
+};
+
 class SapoService {
   private readonly client: AxiosInstance;
   private cachedBlogId: number | null = null;
@@ -69,35 +83,89 @@ class SapoService {
     return (blog.title ?? blog.name ?? "").trim();
   }
 
-  private buildImagePayload(base64: string, mimeType: string): { base64: string } {
+  private buildImageWithDataUri(base64: string, mimeType: string): { base64: string } {
     const normalized = base64.startsWith("data:") ? base64 : `data:${mimeType};base64,${base64}`;
     return { base64: normalized };
+  }
+
+  private buildImageWithRawBase64(base64: string): { base64: string } {
+    return { base64 };
+  }
+
+  private buildImageWithAttachment(base64: string): { attachment: string; filename: string } {
+    return {
+      attachment: base64,
+      filename: "feature.jpg"
+    };
+  }
+
+  private buildPayloadCandidates(input: CreateDraftArticleInput): ArticlePayload[] {
+    return [
+      {
+        article: {
+          title: input.title,
+          content: input.content,
+          published_on: null,
+          image: this.buildImageWithRawBase64(input.imageBase64)
+        }
+      },
+      {
+        article: {
+          title: input.title,
+          content: input.content,
+          published_on: null,
+          image: this.buildImageWithDataUri(input.imageBase64, input.imageMimeType)
+        }
+      },
+      {
+        article: {
+          title: input.title,
+          body_html: input.content,
+          published_on: null,
+          image: this.buildImageWithAttachment(input.imageBase64)
+        }
+      }
+    ];
   }
 
   private async createDraftArticleByBlogId(
     blogId: number,
     input: CreateDraftArticleInput
   ): Promise<CreateDraftArticleResult> {
-    try {
-      const response = await this.client.post<{ article: { id: number | string; title: string } }>(
-        `/admin/blogs/${blogId}/articles.json`,
-        {
-          article: {
-            title: input.title,
-            content: input.content,
-            published_on: null,
-            image: this.buildImagePayload(input.imageBase64, input.imageMimeType)
-          }
-        }
-      );
+    const payloadCandidates = this.buildPayloadCandidates(input);
+    let lastError: unknown;
 
-      return {
-        id: response.data.article.id,
-        title: response.data.article.title
-      };
-    } catch (error) {
-      throw error;
+    for (const [index, payload] of payloadCandidates.entries()) {
+      try {
+        const response = await this.client.post<{ article: { id: number | string; title: string } }>(
+          `/admin/blogs/${blogId}/articles.json`,
+          payload
+        );
+
+        if (index > 0) {
+          logger.warn("Sapo article created with fallback payload", { blogId, attempt: index + 1 });
+        }
+
+        return {
+          id: response.data.article.id,
+          title: response.data.article.title
+        };
+      } catch (error) {
+        lastError = error;
+
+        if (!axios.isAxiosError(error) || error.response?.status !== 422 || index === payloadCandidates.length - 1) {
+          throw error;
+        }
+
+        logger.warn("Sapo rejected article payload, trying fallback", {
+          blogId,
+          attempt: index + 1,
+          responseData: this.summarizeResponseData(error)
+        });
+      }
     }
+
+    throw lastError;
   }
 
   private shouldRetryWithFreshBlog(error: unknown): boolean {
