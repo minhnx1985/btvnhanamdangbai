@@ -52,7 +52,7 @@ SAPO_API_KEY=
 SAPO_API_SECRET=
 SAPO_DEFAULT_BLOG_NAME=Biên tập viên giới thiệu
 
-BOT_ALLOWED_USER_IDS=123456789,987654321
+BOT_ALLOWED_USER_IDS=
 ```
 
 ## Chay local
@@ -95,7 +95,7 @@ npm run start
    - `SAPO_API_KEY`
    - `SAPO_API_SECRET`
    - `SAPO_DEFAULT_BLOG_NAME=Biên tập viên giới thiệu`
-   - `BOT_ALLOWED_USER_IDS`
+   - `BOT_ALLOWED_USER_IDS` (de trong neu muon mo cho tat ca user)
 6. Deploy service.
 
 ### Cach 2: Deploy bang Render Blueprint
@@ -112,7 +112,7 @@ Project da co san file `render.yaml`.
    - `SAPO_BASE_URL`
    - `SAPO_API_KEY`
    - `SAPO_API_SECRET`
-   - `BOT_ALLOWED_USER_IDS`
+   - `BOT_ALLOWED_USER_IDS` (de trong neu muon mo cho tat ca user)
 
 Luu y:
 

@@ -37,7 +37,7 @@ function parseNodeEnv(rawNodeEnv: string | undefined): NodeEnv {
 function parseAllowedUserIds(rawValue: string | undefined): number[] {
   const input = rawValue?.trim();
   if (!input) {
-    throw new AppError("BOT_ALLOWED_USER_IDS is required", "ENV_VALIDATION_ERROR");
+    return [];
   }
 
   const ids = input

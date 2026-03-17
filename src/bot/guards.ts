@@ -7,6 +7,10 @@ export function isAuthorizedUser(userId?: number): boolean {
     return false;
   }
 
+  if (config.allowedUserIds.length === 0) {
+    return true;
+  }
+
   return config.allowedUserIds.includes(userId);
 }
 
