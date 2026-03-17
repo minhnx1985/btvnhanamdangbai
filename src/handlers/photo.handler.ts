@@ -31,12 +31,12 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
     return;
   }
 
-  if (session.state === "waiting_content") {
+  if (session.state === "waiting_content" && !session.content) {
     await ctx.reply(messages.waitContentText);
     return;
   }
 
-  if (session.state !== "waiting_image") {
+  if (session.state !== "waiting_image" && session.state !== "waiting_content") {
     await ctx.reply(messages.genericStartFlow);
     return;
   }

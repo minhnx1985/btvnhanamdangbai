@@ -78,12 +78,14 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
     }
 
     if (session.state === "waiting_content") {
+      const nextContent = session.content ? `${session.content}\n\n${text}` : text;
+
       setSession(userId, {
-        state: "waiting_image",
+        state: "waiting_content",
         title: session.title,
-        content: text
+        content: nextContent
       });
-      await ctx.reply(messages.askImage);
+      await ctx.reply(messages.contentAppended);
       return;
     }
 
