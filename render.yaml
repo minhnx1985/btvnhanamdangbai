@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: telegram-sapo-bot
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_URL
+        sync: false
+      - key: SAPO_BASE_URL
+        sync: false
+      - key: SAPO_API_KEY
+        sync: false
+      - key: SAPO_API_SECRET
+        sync: false
+      - key: SAPO_DEFAULT_BLOG_NAME
+        value: Biên tập viên giới thiệu
+      - key: BOT_ALLOWED_USER_IDS
+        sync: false
