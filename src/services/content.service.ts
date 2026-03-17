@@ -22,11 +22,7 @@ export function plainTextToHtml(text: string): string {
   return paragraphs.join("");
 }
 
-export function prependFeatureImageToHtml(contentHtml: string, imageBase64: string, imageMimeType: string): string {
-  const imageSource = imageBase64.startsWith("data:")
-    ? imageBase64
-    : `data:${imageMimeType};base64,${imageBase64}`;
-
-  const featureImageHtml = `<p><img src="${imageSource}" alt="Feature image" /></p>`;
+export function prependImageUrlToHtml(contentHtml: string, imageUrl: string): string {
+  const featureImageHtml = `<p><img src="${imageUrl}" alt="Feature image" /></p>`;
   return `${featureImageHtml}${contentHtml}`;
 }

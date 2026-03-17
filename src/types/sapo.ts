@@ -14,4 +14,5 @@ export type CreateDraftArticleInput = {
 export type CreateDraftArticleResult = {
   id: number | string;
   title: string;
+  imageSrc?: string;
 };

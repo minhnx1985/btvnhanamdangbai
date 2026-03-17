@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosInstance } from "axios";
 import { config } from "../config/env";
 import { CreateDraftArticleInput, CreateDraftArticleResult, SapoBlog } from "../types/sapo";
+import { prependImageUrlToHtml } from "./content.service";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
@@ -9,11 +10,19 @@ type ArticlePayload = {
     title: string;
     published_on: null;
     content?: string;
-    body_html?: string;
     image?: {
       base64?: string;
-      attachment?: string;
-      filename?: string;
+    };
+  };
+};
+
+type SapoArticleResponse = {
+  article: {
+    id: number | string;
+    title: string;
+    content?: string;
+    image?: {
+      src?: string;
     };
   };
 };
@@ -83,89 +92,84 @@ class SapoService {
     return (blog.title ?? blog.name ?? "").trim();
   }
 
-  private buildImageWithDataUri(base64: string, mimeType: string): { base64: string } {
-    const normalized = base64.startsWith("data:") ? base64 : `data:${mimeType};base64,${base64}`;
-    return { base64: normalized };
-  }
-
   private buildImageWithRawBase64(base64: string): { base64: string } {
     return { base64 };
   }
 
-  private buildImageWithAttachment(base64: string): { attachment: string; filename: string } {
+  private buildCreatePayload(input: CreateDraftArticleInput): ArticlePayload {
     return {
-      attachment: base64,
-      filename: "feature.jpg"
+      article: {
+        title: input.title,
+        content: input.content,
+        published_on: null
+      }
     };
   }
 
-  private buildPayloadCandidates(input: CreateDraftArticleInput): ArticlePayload[] {
-    return [
-      {
-        article: {
-          title: input.title,
-          content: input.content,
-          published_on: null,
-          image: this.buildImageWithRawBase64(input.imageBase64)
-        }
-      },
-      {
-        article: {
-          title: input.title,
-          content: input.content,
-          published_on: null,
-          image: this.buildImageWithDataUri(input.imageBase64, input.imageMimeType)
-        }
-      },
-      {
-        article: {
-          title: input.title,
-          body_html: input.content,
-          published_on: null,
-          image: this.buildImageWithAttachment(input.imageBase64)
-        }
+  private buildUpdatePayload(content: string, imageBase64: string): ArticlePayload {
+    return {
+      article: {
+        title: "",
+        content,
+        published_on: null,
+        image: this.buildImageWithRawBase64(imageBase64)
       }
-    ];
+    };
   }
 
   private async createDraftArticleByBlogId(
     blogId: number,
     input: CreateDraftArticleInput
   ): Promise<CreateDraftArticleResult> {
-    const payloadCandidates = this.buildPayloadCandidates(input);
-    let lastError: unknown;
+    const createdArticle = await this.createArticleRecord(blogId, input);
+    const updatedArticle = await this.attachFeatureImage(blogId, createdArticle.id, input, createdArticle.image?.src);
+    const imageSrc = updatedArticle.image?.src ?? createdArticle.image?.src;
 
-    for (const [index, payload] of payloadCandidates.entries()) {
-      try {
-        const response = await this.client.post<{ article: { id: number | string; title: string } }>(
-          `/admin/blogs/${blogId}/articles.json`,
-          payload
-        );
-
-        if (index > 0) {
-          logger.warn("Sapo article created with fallback payload", { blogId, attempt: index + 1 });
-        }
-
-        return {
-          id: response.data.article.id,
-          title: response.data.article.title
-        };
-      } catch (error) {
-        lastError = error;
-
-        if (!axios.isAxiosError(error) || error.response?.status !== 422 || index === payloadCandidates.length - 1) {
-          throw error;
-        }
-
-        logger.warn("Sapo rejected article payload, trying fallback", {
-          blogId,
-          attempt: index + 1,
-          responseData: this.summarizeResponseData(error)
-        });
-      }
+    if (imageSrc) {
+      await this.updateArticleContentWithFeatureImage(blogId, createdArticle.id, input, imageSrc);
     }
 
-    throw lastError;
+    return {
+      id: createdArticle.id,
+      title: createdArticle.title,
+      imageSrc
+    };
+  }
+
+  private async createArticleRecord(blogId: number, input: CreateDraftArticleInput): Promise<SapoArticleResponse["article"]> {
+    const response = await this.client.post<SapoArticleResponse>(`/admin/blogs/${blogId}/articles.json`, this.buildCreatePayload(input));
+    return response.data.article;
+  }
+
+  private async attachFeatureImage(
+    blogId: number,
+    articleId: number | string,
+    input: CreateDraftArticleInput,
+    currentImageSrc?: string
+  ): Promise<SapoArticleResponse["article"]> {
+    const payload = this.buildUpdatePayload(input.content, input.imageBase64);
+    payload.article.title = input.title;
+
+    const response = await this.client.put<SapoArticleResponse>(`/admin/blogs/${blogId}/articles/${articleId}.json`, payload);
+    return {
+      ...response.data.article,
+      image: response.data.article.image?.src ? response.data.article.image : currentImageSrc ? { src: currentImageSrc } : undefined
+    };
+  }
+
+  private async updateArticleContentWithFeatureImage(
+    blogId: number,
+    articleId: number | string,
+    input: CreateDraftArticleInput,
+    imageSrc: string
+  ): Promise<void> {
+    await this.client.put<SapoArticleResponse>(`/admin/blogs/${blogId}/articles/${articleId}.json`, {
+      article: {
+        title: input.title,
+        content: prependImageUrlToHtml(input.content, imageSrc),
+        published_on: null
+      }
+    });
   }
 
   private shouldRetryWithFreshBlog(error: unknown): boolean {

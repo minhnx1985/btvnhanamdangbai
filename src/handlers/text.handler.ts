@@ -1,7 +1,7 @@
 import { Context } from "telegraf";
 import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
-import { plainTextToHtml, prependFeatureImageToHtml } from "../services/content.service";
+import { plainTextToHtml } from "../services/content.service";
 import { sapoService } from "../services/sapo.service";
 import { normalizeDecision, truncateText } from "../utils/text";
 import { logger } from "../utils/logger";
@@ -92,15 +92,9 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       await ctx.reply(messages.submitting);
 
       try {
-        const articleContentHtml = prependFeatureImageToHtml(
-          plainTextToHtml(session.content),
-          session.imageBase64,
-          session.imageMimeType
-        );
-
         const result = await sapoService.createDraftArticle({
           title: session.title,
-          content: articleContentHtml,
+          content: plainTextToHtml(session.content),
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType
         });
