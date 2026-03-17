@@ -84,7 +84,7 @@ npm run start
 3. Ket noi repo.
 4. Cau hinh:
    - Runtime: `Node`
-   - Build Command: `npm install && npm run build`
+   - Build Command: `npm install --include=dev && npm run build`
    - Start Command: `npm start`
    - Health Check Path: `/health`
 5. Them env vars:
