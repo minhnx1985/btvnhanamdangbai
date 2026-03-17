@@ -1,11 +1,10 @@
 import { Context } from "telegraf";
 import { messages } from "../bot/messages";
-import { getSession, setSession } from "../bot/sessionStore";
-import { config } from "../config/env";
+import { getSession, resetSession } from "../bot/sessionStore";
 import { compressImageUnder1MB } from "../services/image.service";
 import { downloadTelegramPhoto } from "../services/telegram-file.service";
-import { buildConfirmationPreview } from "./text.handler";
 import { logger } from "../utils/logger";
+import { submitDraftPost } from "./text.handler";
 
 type PhotoContext = Context & {
   message: {
@@ -37,17 +36,13 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
     return;
   }
 
-  if (session.state === "waiting_confirmation") {
-    await ctx.reply(messages.waitConfirmationText);
-    return;
-  }
-
   if (session.state !== "waiting_image") {
     await ctx.reply(messages.genericStartFlow);
     return;
   }
 
   if (!session.title || !session.content) {
+    resetSession(userId);
     await ctx.reply("❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại");
     return;
   }
@@ -61,18 +56,16 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
       sizeBytes: processedImage.sizeBytes
     });
 
-    setSession(userId, {
-      state: "waiting_confirmation",
+    await submitDraftPost(ctx, userId, {
       title: session.title,
       content: session.content,
       imageBase64: processedImage.base64,
       imageMimeType: processedImage.mimeType
     });
-
-    await ctx.reply(buildConfirmationPreview(session.title, session.content, config.sapoDefaultBlogName));
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Không thể xử lý ảnh dưới 1MB";
     logger.error("photo handler failed", { userId, reason });
+    resetSession(userId);
     await ctx.reply(`❌ Tạo bài nháp thất bại: ${reason}`);
   }
 }

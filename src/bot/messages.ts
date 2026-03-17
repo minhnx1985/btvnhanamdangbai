@@ -7,7 +7,7 @@ export const messages = {
     "1. Gửi tiêu đề",
     "2. Gửi nội dung",
     "3. Gửi ảnh",
-    "4. Xác nhận bằng Y hoặc N",
+    "4. Bot tạo bài nháp tự động",
     "",
     "Gõ /newpost để bắt đầu."
   ].join("\n"),
@@ -20,6 +20,6 @@ export const messages = {
   waitTitleText: "Hiện tại tôi đang chờ tiêu đề bài viết. Vui lòng gửi tiêu đề bằng text.",
   waitContentText: "Hiện tại tôi đang chờ nội dung bài viết. Vui lòng gửi nội dung bằng text.",
   waitImagePhoto: "Hiện tại tôi đang chờ ảnh feature. Vui lòng gửi 1 ảnh.",
-  waitConfirmationText: "Vui lòng trả lời Y để đăng hoặc N để hủy",
+  waitConfirmationText: "Bài viết sẽ được tạo tự động sau khi bạn gửi ảnh feature",
   submitting: "Đang tạo bài nháp..."
 } as const;
