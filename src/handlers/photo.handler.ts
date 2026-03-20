@@ -4,6 +4,7 @@ import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { compressImageUnder1MB } from "../services/image.service";
 import { downloadTelegramPhoto } from "../services/telegram-file.service";
 import { logger } from "../utils/logger";
+import { submitDraftPost } from "./text.handler";
 
 type PhotoContext = Context & {
   message: {
@@ -57,11 +58,24 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
 
     logger.info("image processed size", {
       userId,
-      sizeBytes: processedImage.sizeBytes
+      sizeBytes: processedImage.sizeBytes,
+      postType: session.postType ?? "blog"
     });
+
+    if ((session.postType ?? "blog") === "author") {
+      await submitDraftPost(ctx, userId, {
+        title: session.title,
+        content: session.content,
+        imageBase64: processedImage.base64,
+        imageMimeType: processedImage.mimeType,
+        postType: "author"
+      });
+      return;
+    }
 
     setSession(userId, {
       state: "waiting_product_link",
+      postType: "blog",
       title: session.title,
       content: session.content,
       imageBase64: processedImage.base64,
@@ -71,7 +85,7 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
     await ctx.reply(messages.askProductLink);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Không thể xử lý ảnh dưới 1MB";
-    logger.error("photo handler failed", { userId, reason });
+    logger.error("photo handler failed", { userId, reason, postType: session.postType ?? "blog" });
     resetSession(userId);
     await ctx.reply(`❌ Tạo bài nháp thất bại: ${reason}`);
   }

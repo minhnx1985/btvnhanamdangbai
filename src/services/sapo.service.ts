@@ -11,6 +11,7 @@ type ArticlePayload = {
     published_on: null;
     content?: string;
     tags?: string;
+    template_layout?: string;
     image?: {
       base64?: string;
     };
@@ -37,7 +38,7 @@ const productMessages = {
 
 class SapoService {
   private readonly client: AxiosInstance;
-  private cachedBlogId: number | null = null;
+  private readonly blogIdCache = new Map<string, number>();
 
   constructor() {
     this.client = axios.create({
@@ -54,32 +55,34 @@ class SapoService {
     });
   }
 
-  async getDefaultBlogId(): Promise<number> {
-    if (this.cachedBlogId) {
-      return this.cachedBlogId;
+  async getBlogIdByName(blogName: string): Promise<number> {
+    const cached = this.blogIdCache.get(blogName);
+    if (cached) {
+      return cached;
     }
 
     const blogs = await this.fetchBlogs();
-    const blog = blogs.find((item) => this.getBlogName(item) === config.sapoDefaultBlogName);
+    const blog = blogs.find((item) => this.getBlogName(item) === blogName);
 
     if (!blog) {
       throw new AppError("Không tìm thấy blog mặc định trên Sapo", "SAPO_BLOG_NOT_FOUND");
     }
 
-    this.cachedBlogId = blog.id;
+    this.blogIdCache.set(blogName, blog.id);
     return blog.id;
   }
 
   async createDraftArticle(input: CreateDraftArticleInput): Promise<CreateDraftArticleResult> {
-    let blogId = await this.getDefaultBlogId();
+    const blogName = input.blogName ?? config.sapoDefaultBlogName;
+    let blogId = await this.getBlogIdByName(blogName);
 
     try {
       return await this.createDraftArticleByBlogId(blogId, input);
     } catch (error) {
       if (this.shouldRetryWithFreshBlog(error)) {
-        logger.warn("Sapo create article hit 404, refreshing cached blog id");
-        this.cachedBlogId = null;
-        blogId = await this.getDefaultBlogId();
+        logger.warn("Sapo create article hit 404, refreshing cached blog id", { blogName });
+        this.blogIdCache.delete(blogName);
+        blogId = await this.getBlogIdByName(blogName);
         return this.createDraftArticleByBlogId(blogId, input);
       }
 
@@ -179,17 +182,19 @@ class SapoService {
         title: input.title,
         content: input.content,
         tags: input.tags,
+        template_layout: input.templateLayout,
         published_on: null
       }
     };
   }
 
-  private buildUpdatePayload(content: string, imageBase64: string, title: string, tags?: string): ArticlePayload {
+  private buildUpdatePayload(content: string, imageBase64: string, input: CreateDraftArticleInput): ArticlePayload {
     return {
       article: {
-        title,
+        title: input.title,
         content,
-        tags,
+        tags: input.tags,
+        template_layout: input.templateLayout,
         published_on: null,
         image: this.buildImageWithRawBase64(imageBase64)
       }
@@ -204,7 +209,7 @@ class SapoService {
     const updatedArticle = await this.attachFeatureImage(blogId, createdArticle.id, input, createdArticle.image?.src);
     const imageSrc = updatedArticle.image?.src ?? createdArticle.image?.src;
 
-    if (imageSrc) {
+    if (imageSrc && input.prependFeatureImageInContent !== false) {
       await this.updateArticleContentWithFeatureImage(blogId, createdArticle.id, input, imageSrc);
     }
 
@@ -229,7 +234,7 @@ class SapoService {
     input: CreateDraftArticleInput,
     currentImageSrc?: string
   ): Promise<SapoArticleResponse["article"]> {
-    const payload = this.buildUpdatePayload(input.content, input.imageBase64, input.title, input.tags);
+    const payload = this.buildUpdatePayload(input.content, input.imageBase64, input);
     const response = await this.client.put<SapoArticleResponse>(`/admin/blogs/${blogId}/articles/${articleId}.json`, payload);
 
     return {
@@ -249,6 +254,7 @@ class SapoService {
         title: input.title,
         content: prependImageUrlToHtml(input.content, imageSrc),
         tags: input.tags,
+        template_layout: input.templateLayout,
         published_on: null
       }
     });

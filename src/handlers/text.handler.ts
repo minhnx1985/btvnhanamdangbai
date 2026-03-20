@@ -3,7 +3,9 @@ import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { plainTextToHtml } from "../services/content.service";
 import { sapoService } from "../services/sapo.service";
+import { PostType } from "../types/session";
 import { logger } from "../utils/logger";
+import { config } from "../config/env";
 
 type TextContext = Context & {
   message: {
@@ -16,6 +18,7 @@ type DraftSubmissionInput = {
   content: string;
   imageBase64: string;
   imageMimeType: string;
+  postType: PostType;
   tags?: string;
 };
 
@@ -31,19 +34,26 @@ export async function submitDraftPost(
 ): Promise<void> {
   await ctx.reply(messages.submitting);
 
+  const isAuthorPost = input.postType === "author";
+  const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
+
   try {
     const result = await sapoService.createDraftArticle({
       title: input.title,
       content: plainTextToHtml(input.content),
       imageBase64: input.imageBase64,
       imageMimeType: input.imageMimeType,
-      tags: input.tags
+      tags: input.tags,
+      blogName,
+      templateLayout: isAuthorPost ? config.sapoAuthorTemplateLayout : undefined,
+      prependFeatureImageInContent: !isAuthorPost
     });
 
     logger.info("create draft success", {
       userId,
       articleId: result.id,
       title: result.title,
+      postType: input.postType,
       tags: input.tags ?? ""
     });
     resetSession(userId);
@@ -51,7 +61,7 @@ export async function submitDraftPost(
     const lines = [
       "✅ Đã tạo bài nháp thành công",
       `- Tiêu đề: ${result.title}`,
-      "- Blog: Biên tập viên giới thiệu",
+      `- Blog: ${blogName}`,
       `- Article ID: ${result.id}`
     ];
 
@@ -62,7 +72,7 @@ export async function submitDraftPost(
     await ctx.reply(lines.join("\n"));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lỗi hệ thống, vui lòng thử lại";
-    logger.error("create draft fail", { userId, reason: message });
+    logger.error("create draft fail", { userId, reason: message, postType: input.postType });
     resetSession(userId);
     await ctx.reply(`❌ Tạo bài nháp thất bại: ${message}`);
   }
@@ -88,6 +98,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
     if (session.state === "waiting_title") {
       setSession(userId, {
         state: "waiting_content",
+        postType: session.postType ?? "blog",
         title: text
       });
       await ctx.reply(messages.askContent);
@@ -99,6 +110,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
 
       setSession(userId, {
         state: "waiting_content",
+        postType: session.postType ?? "blog",
         title: session.title,
         content: nextContent
       });
@@ -123,7 +135,8 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType
+          imageMimeType: session.imageMimeType,
+          postType: "blog"
         });
         return;
       }
@@ -135,17 +148,19 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
+          postType: "blog",
           tags: productTag
         });
         return;
       } catch (error) {
-        const message = error instanceof Error ? error.message : messages.productLookupFailed;
+        const message = error instanceof Error ? error.message : "Skip invalid product links";
         logger.warn("product link resolution failed", { userId, reason: message });
         await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType
+          imageMimeType: session.imageMimeType,
+          postType: "blog"
         });
         return;
       }

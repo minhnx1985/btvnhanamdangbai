@@ -10,6 +10,9 @@ export type CreateDraftArticleInput = {
   imageBase64: string;
   imageMimeType: string;
   tags?: string;
+  blogName?: string;
+  templateLayout?: string;
+  prependFeatureImageInContent?: boolean;
 };
 
 export type CreateDraftArticleResult = {

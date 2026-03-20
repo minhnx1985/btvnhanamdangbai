@@ -2,6 +2,7 @@ import { Context, Telegraf } from "telegraf";
 import { config } from "../config/env";
 import { authorizedOnly, isAuthorizedUser } from "./guards";
 import { messages } from "./messages";
+import { handleAuthor } from "../handlers/author.handler";
 import { handleCancel } from "../handlers/cancel.handler";
 import { handleNewPost } from "../handlers/newpost.handler";
 import { handlePhotoMessage } from "../handlers/photo.handler";
@@ -28,6 +29,7 @@ export function createBot(): Telegraf<Context> {
 
   bot.start(handleStart);
   bot.command("newpost", handleNewPost);
+  bot.command("author", handleAuthor);
   bot.command("cancel", handleCancel);
 
   bot.on("text", async (ctx) => {

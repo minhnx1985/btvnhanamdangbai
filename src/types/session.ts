@@ -5,8 +5,11 @@ export type SessionState =
   | "waiting_image"
   | "waiting_product_link";
 
+export type PostType = "blog" | "author";
+
 export type PostSession = {
   state: SessionState;
+  postType?: PostType;
   title?: string;
   content?: string;
   imageBase64?: string;
