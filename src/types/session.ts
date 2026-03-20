@@ -3,7 +3,7 @@ export type SessionState =
   | "waiting_title"
   | "waiting_content"
   | "waiting_image"
-  | "waiting_confirmation";
+  | "waiting_product_link";
 
 export type PostSession = {
   state: SessionState;
@@ -11,4 +11,5 @@ export type PostSession = {
   content?: string;
   imageBase64?: string;
   imageMimeType?: string;
+  productTag?: string;
 };

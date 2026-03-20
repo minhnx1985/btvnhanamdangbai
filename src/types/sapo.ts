@@ -9,10 +9,19 @@ export type CreateDraftArticleInput = {
   content: string;
   imageBase64: string;
   imageMimeType: string;
+  tags?: string;
 };
 
 export type CreateDraftArticleResult = {
   id: number | string;
   title: string;
   imageSrc?: string;
+};
+
+export type SapoProduct = {
+  id: number | string;
+  alias?: string;
+  variants?: Array<{
+    sku?: string | null;
+  }>;
 };

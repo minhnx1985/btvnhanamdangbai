@@ -71,8 +71,8 @@ export function createBot(): Telegraf<Context> {
       return;
     }
 
-    if (session.state === "waiting_confirmation") {
-      await ctx.reply(messages.waitConfirmationText);
+    if (session.state === "waiting_product_link") {
+      await ctx.reply(messages.waitProductLinkText);
       return;
     }
 

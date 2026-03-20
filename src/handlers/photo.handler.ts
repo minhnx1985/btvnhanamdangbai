@@ -1,10 +1,9 @@
 import { Context } from "telegraf";
 import { messages } from "../bot/messages";
-import { getSession, resetSession } from "../bot/sessionStore";
+import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { compressImageUnder1MB } from "../services/image.service";
 import { downloadTelegramPhoto } from "../services/telegram-file.service";
 import { logger } from "../utils/logger";
-import { submitDraftPost } from "./text.handler";
 
 type PhotoContext = Context & {
   message: {
@@ -36,6 +35,11 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
     return;
   }
 
+  if (session.state === "waiting_product_link") {
+    await ctx.reply(messages.waitProductLinkText);
+    return;
+  }
+
   if (session.state !== "waiting_image" && session.state !== "waiting_content") {
     await ctx.reply(messages.genericStartFlow);
     return;
@@ -56,12 +60,15 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
       sizeBytes: processedImage.sizeBytes
     });
 
-    await submitDraftPost(ctx, userId, {
+    setSession(userId, {
+      state: "waiting_product_link",
       title: session.title,
       content: session.content,
       imageBase64: processedImage.base64,
       imageMimeType: processedImage.mimeType
     });
+
+    await ctx.reply(messages.askProductLink);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Không thể xử lý ảnh dưới 1MB";
     logger.error("photo handler failed", { userId, reason });

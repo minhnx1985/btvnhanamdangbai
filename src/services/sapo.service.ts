@@ -1,6 +1,6 @@
 import axios, { AxiosError, AxiosInstance } from "axios";
 import { config } from "../config/env";
-import { CreateDraftArticleInput, CreateDraftArticleResult, SapoBlog } from "../types/sapo";
+import { CreateDraftArticleInput, CreateDraftArticleResult, SapoBlog, SapoProduct } from "../types/sapo";
 import { prependImageUrlToHtml } from "./content.service";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
@@ -10,6 +10,7 @@ type ArticlePayload = {
     title: string;
     published_on: null;
     content?: string;
+    tags?: string;
     image?: {
       base64?: string;
     };
@@ -79,6 +80,14 @@ class SapoService {
     }
   }
 
+  async resolveProductTagFromUrl(productUrl: string): Promise<string> {
+    const alias = this.extractAliasFromProductUrl(productUrl);
+    const product = await this.getProductByAlias(alias);
+    const productCode = product.variants?.[0]?.sku?.trim() || String(product.id);
+
+    return `Sản phẩm ${productCode}`;
+  }
+
   private async fetchBlogs(): Promise<SapoBlog[]> {
     try {
       const response = await this.client.get<{ blogs?: SapoBlog[]; blog?: SapoBlog[] }>("/admin/blogs.json");
@@ -86,6 +95,50 @@ class SapoService {
     } catch (error) {
       throw this.mapSapoError(error);
     }
+  }
+
+  private async getProductByAlias(alias: string): Promise<SapoProduct> {
+    try {
+      const response = await this.client.get<{ products?: SapoProduct[] }>(`/admin/products.json?alias=${encodeURIComponent(alias)}`);
+      const product = response.data.products?.find((item) => item.alias === alias) ?? response.data.products?.[0];
+
+      if (!product) {
+        throw new AppError(messages.productLookupFailed, "PRODUCT_NOT_FOUND");
+      }
+
+      return product;
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw this.mapSapoError(error);
+    }
+  }
+
+  private extractAliasFromProductUrl(productUrl: string): string {
+    let url: URL;
+
+    try {
+      url = new URL(productUrl);
+    } catch {
+      throw new AppError(messages.invalidProductLink, "PRODUCT_URL_INVALID");
+    }
+
+    const hostname = url.hostname.toLowerCase();
+    const allowedHosts = new Set([config.sapoProductUrlHost, `www.${config.sapoProductUrlHost}`]);
+    if (!allowedHosts.has(hostname)) {
+      throw new AppError(messages.invalidProductLink, "PRODUCT_URL_INVALID");
+    }
+
+    const pathSegments = url.pathname.split("/").map((segment) => segment.trim()).filter(Boolean);
+    const alias = pathSegments[pathSegments.length - 1];
+
+    if (!alias) {
+      throw new AppError(messages.invalidProductLink, "PRODUCT_URL_INVALID");
+    }
+
+    return alias;
   }
 
   private getBlogName(blog: SapoBlog): string {
@@ -101,16 +154,18 @@ class SapoService {
       article: {
         title: input.title,
         content: input.content,
+        tags: input.tags,
         published_on: null
       }
     };
   }
 
-  private buildUpdatePayload(content: string, imageBase64: string): ArticlePayload {
+  private buildUpdatePayload(content: string, imageBase64: string, title: string, tags?: string): ArticlePayload {
     return {
       article: {
-        title: "",
+        title,
         content,
+        tags,
         published_on: null,
         image: this.buildImageWithRawBase64(imageBase64)
       }
@@ -147,10 +202,9 @@ class SapoService {
     input: CreateDraftArticleInput,
     currentImageSrc?: string
   ): Promise<SapoArticleResponse["article"]> {
-    const payload = this.buildUpdatePayload(input.content, input.imageBase64);
-    payload.article.title = input.title;
-
+    const payload = this.buildUpdatePayload(input.content, input.imageBase64, input.title, input.tags);
     const response = await this.client.put<SapoArticleResponse>(`/admin/blogs/${blogId}/articles/${articleId}.json`, payload);
+
     return {
       ...response.data.article,
       image: response.data.article.image?.src ? response.data.article.image : currentImageSrc ? { src: currentImageSrc } : undefined
@@ -167,6 +221,7 @@ class SapoService {
       article: {
         title: input.title,
         content: prependImageUrlToHtml(input.content, imageSrc),
+        tags: input.tags,
         published_on: null
       }
     });
@@ -217,5 +272,12 @@ class SapoService {
     return data;
   }
 }
+
+const messages = {
+  invalidProductLink:
+    "Link sản phẩm không hợp lệ. Vui lòng gửi đúng link dạng https://nhanam.vn/... hoặc trả lời BO QUA.",
+  productLookupFailed:
+    "Không tìm thấy sản phẩm từ link này. Vui lòng kiểm tra lại link https://nhanam.vn/... hoặc trả lời BO QUA."
+} as const;
 
 export const sapoService = new SapoService();
