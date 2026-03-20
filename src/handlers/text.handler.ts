@@ -141,7 +141,12 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       } catch (error) {
         const message = error instanceof Error ? error.message : messages.productLookupFailed;
         logger.warn("product link resolution failed", { userId, reason: message });
-        await ctx.reply(message);
+        await submitDraftPost(ctx, userId, {
+          title: session.title,
+          content: session.content,
+          imageBase64: session.imageBase64,
+          imageMimeType: session.imageMimeType
+        });
         return;
       }
     }
