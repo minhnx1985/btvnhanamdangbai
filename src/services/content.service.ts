@@ -65,6 +65,6 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 }
 
 export function prependImageUrlToHtml(contentHtml: string, imageUrl: string): string {
-  const featureImageHtml = `<p><img src="${imageUrl}" alt="Feature image" /></p>`;
+  const featureImageHtml = `<p style="text-align:center;"><img src="${escapeHtml(imageUrl)}" alt="Feature image" /></p>`;
   return `${featureImageHtml}${contentHtml}`;
 }
