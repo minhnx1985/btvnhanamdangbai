@@ -38,9 +38,13 @@ export async function submitDraftPost(
   const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
 
   try {
+    const contentHtml = plainTextToHtml(input.content, {
+      embedDirectImageLinks: !isAuthorPost
+    });
+
     const result = await sapoService.createDraftArticle({
       title: input.title,
-      content: plainTextToHtml(input.content),
+      content: contentHtml,
       imageBase64: input.imageBase64,
       imageMimeType: input.imageMimeType,
       tags: input.tags,
