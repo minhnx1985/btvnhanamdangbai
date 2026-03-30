@@ -1,6 +1,13 @@
 import axios, { AxiosError, AxiosInstance } from "axios";
 import { config } from "../config/env";
-import { CreateDraftArticleInput, CreateDraftArticleResult, SapoBlog, SapoProduct } from "../types/sapo";
+import {
+  CreateDraftArticleInput,
+  CreateDraftArticleResult,
+  LinkedProduct,
+  ResolvedProductLinks,
+  SapoBlog,
+  SapoProduct
+} from "../types/sapo";
 import { prependImageUrlToHtml } from "./content.service";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
@@ -90,20 +97,27 @@ class SapoService {
     }
   }
 
-  async resolveProductTagFromUrl(productText: string): Promise<string> {
-    const aliases = this.extractAliasesFromProductText(productText);
-    if (aliases.length === 0) {
+  async resolveProductLinks(productText: string): Promise<ResolvedProductLinks> {
+    const extractedLinks = this.extractProductLinks(productText);
+    if (extractedLinks.length === 0) {
       throw new AppError(productMessages.invalidProductLink, "PRODUCT_URL_INVALID");
     }
 
-    const productIds: string[] = [];
+    const linkedProducts: LinkedProduct[] = [];
 
-    for (const alias of aliases) {
-      const product = await this.getProductByAlias(alias);
-      productIds.push(String(product.id).trim());
+    for (const item of extractedLinks) {
+      const product = await this.getProductByAlias(item.alias);
+      linkedProducts.push({
+        id: String(product.id).trim(),
+        title: (product.title ?? product.name ?? item.alias).trim(),
+        url: item.url
+      });
     }
 
-    return `Sản phẩm ${productIds.join("_")}`;
+    return {
+      tag: `Sản phẩm ${linkedProducts.map((product) => product.id).join("_")}`,
+      linkedProducts
+    };
   }
 
   private async fetchBlogs(): Promise<SapoBlog[]> {
@@ -136,10 +150,11 @@ class SapoService {
     }
   }
 
-  private extractAliasesFromProductText(productText: string): string[] {
+  private extractProductLinks(productText: string): Array<{ alias: string; url: string }> {
     const matches = productText.match(/https?:\/\/[^\s]+/g) ?? [];
-    const aliases = new Set<string>();
     const allowedHosts = new Set([config.sapoProductUrlHost, `www.${config.sapoProductUrlHost}`]);
+    const seenAliases = new Set<string>();
+    const extracted: Array<{ alias: string; url: string }> = [];
 
     for (const match of matches) {
       let url: URL;
@@ -160,12 +175,18 @@ class SapoService {
         .filter(Boolean);
       const alias = pathSegments[pathSegments.length - 1];
 
-      if (alias) {
-        aliases.add(alias);
+      if (!alias || seenAliases.has(alias)) {
+        continue;
       }
+
+      seenAliases.add(alias);
+      extracted.push({
+        alias,
+        url: url.toString()
+      });
     }
 
-    return [...aliases];
+    return extracted;
   }
 
   private getBlogName(blog: SapoBlog): string {

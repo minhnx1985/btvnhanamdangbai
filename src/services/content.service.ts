@@ -1,6 +1,13 @@
+import { LinkedProduct } from "../types/sapo";
+
 type PlainTextToHtmlOptions = {
   embedDirectImageLinks?: boolean;
+  linkedProducts?: LinkedProduct[];
 };
+
+type TextToken =
+  | { type: "text"; value: string }
+  | { type: "link"; value: string; href: string };
 
 function escapeHtml(text: string): string {
   return text
@@ -11,16 +18,89 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function isDirectImageUrl(text: string): boolean {
   return /^https?:\/\/\S+\.(jpg|jpeg|png|webp|gif|bmp|svg)(\?\S*)?$/i.test(text.trim());
 }
 
-function buildTextParagraph(lines: string[]): string {
-  return `<p>${escapeHtml(lines.join("\n")).replace(/\n/g, "<br />")}</p>`;
-}
-
 function buildCenteredImage(url: string): string {
   return `<p style="text-align:center;"><img src="${escapeHtml(url)}" alt="" /></p>`;
+}
+
+function tokenizeLinkedText(text: string, linkedProducts: LinkedProduct[]): TextToken[] {
+  let tokens: TextToken[] = [{ type: "text", value: text }];
+
+  const sortedProducts = [...linkedProducts]
+    .filter((product) => product.title.trim().length > 0)
+    .sort((left, right) => right.title.length - left.title.length);
+
+  for (const product of sortedProducts) {
+    const nextTokens: TextToken[] = [];
+    const pattern = new RegExp(escapeRegExp(product.title), "giu");
+
+    for (const token of tokens) {
+      if (token.type !== "text") {
+        nextTokens.push(token);
+        continue;
+      }
+
+      let lastIndex = 0;
+      let match = pattern.exec(token.value);
+      while (match) {
+        if (match.index > lastIndex) {
+          nextTokens.push({
+            type: "text",
+            value: token.value.slice(lastIndex, match.index)
+          });
+        }
+
+        nextTokens.push({
+          type: "link",
+          value: match[0],
+          href: product.url
+        });
+
+        lastIndex = match.index + match[0].length;
+        match = pattern.exec(token.value);
+      }
+
+      if (lastIndex < token.value.length) {
+        nextTokens.push({
+          type: "text",
+          value: token.value.slice(lastIndex)
+        });
+      }
+
+      if (lastIndex === 0) {
+        nextTokens.push(token);
+      }
+    }
+
+    tokens = nextTokens;
+  }
+
+  return tokens;
+}
+
+function renderInlineText(text: string, linkedProducts: LinkedProduct[]): string {
+  const tokens = tokenizeLinkedText(text, linkedProducts);
+  return tokens
+    .map((token) => {
+      if (token.type === "text") {
+        return escapeHtml(token.value);
+      }
+
+      return `<a href="${escapeHtml(token.href)}">${escapeHtml(token.value)}</a>`;
+    })
+    .join("");
+}
+
+function buildTextParagraph(lines: string[], linkedProducts: LinkedProduct[]): string {
+  const renderedLines = lines.map((line) => renderInlineText(line, linkedProducts));
+  return `<p>${renderedLines.join("<br />")}</p>`;
 }
 
 export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = {}): string {
@@ -29,6 +109,7 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
     return "<p></p>";
   }
 
+  const linkedProducts = options.linkedProducts ?? [];
   const blocks: string[] = [];
   const textBuffer: string[] = [];
   const lines = normalized.split("\n");
@@ -38,7 +119,7 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
       return;
     }
 
-    blocks.push(buildTextParagraph(textBuffer));
+    blocks.push(buildTextParagraph(textBuffer, linkedProducts));
     textBuffer.length = 0;
   };
 

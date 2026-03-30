@@ -1,11 +1,12 @@
 import { Context } from "telegraf";
+import { config } from "../config/env";
 import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { plainTextToHtml } from "../services/content.service";
 import { sapoService } from "../services/sapo.service";
+import { LinkedProduct } from "../types/sapo";
 import { PostType } from "../types/session";
 import { logger } from "../utils/logger";
-import { config } from "../config/env";
 
 type TextContext = Context & {
   message: {
@@ -20,6 +21,7 @@ type DraftSubmissionInput = {
   imageMimeType: string;
   postType: PostType;
   tags?: string;
+  linkedProducts?: LinkedProduct[];
 };
 
 function isSkipProductLinkInput(text: string): boolean {
@@ -39,7 +41,8 @@ export async function submitDraftPost(
 
   try {
     const contentHtml = plainTextToHtml(input.content, {
-      embedDirectImageLinks: !isAuthorPost
+      embedDirectImageLinks: !isAuthorPost,
+      linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
     });
 
     const result = await sapoService.createDraftArticle({
@@ -58,7 +61,8 @@ export async function submitDraftPost(
       articleId: result.id,
       title: result.title,
       postType: input.postType,
-      tags: input.tags ?? ""
+      tags: input.tags ?? "",
+      linkedProducts: input.linkedProducts?.length ?? 0
     });
     resetSession(userId);
 
@@ -146,14 +150,15 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       }
 
       try {
-        const productTag = await sapoService.resolveProductTagFromUrl(text);
+        const resolvedProducts = await sapoService.resolveProductLinks(text);
         await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
           postType: "blog",
-          tags: productTag
+          tags: resolvedProducts.tag,
+          linkedProducts: resolvedProducts.linkedProducts
         });
         return;
       } catch (error) {

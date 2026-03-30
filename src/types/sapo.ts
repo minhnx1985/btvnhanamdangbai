@@ -4,6 +4,17 @@ export type SapoBlog = {
   name?: string;
 };
 
+export type LinkedProduct = {
+  id: string;
+  title: string;
+  url: string;
+};
+
+export type ResolvedProductLinks = {
+  tag: string;
+  linkedProducts: LinkedProduct[];
+};
+
 export type CreateDraftArticleInput = {
   title: string;
   content: string;
@@ -24,6 +35,8 @@ export type CreateDraftArticleResult = {
 export type SapoProduct = {
   id: number | string;
   alias?: string;
+  title?: string;
+  name?: string;
   variants?: Array<{
     sku?: string | null;
   }>;
