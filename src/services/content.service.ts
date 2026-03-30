@@ -27,7 +27,7 @@ function isDirectImageUrl(text: string): boolean {
 }
 
 function buildCenteredImage(url: string): string {
-  return `<p style="text-align:center;"><img src="${escapeHtml(url)}" alt="" /></p>`;
+  return `<p style="text-align:center; margin: 0 0 16px 0;"><img src="${escapeHtml(url)}" alt="" /></p>`;
 }
 
 function tokenizeLinkedText(text: string, linkedProducts: LinkedProduct[]): TextToken[] {
@@ -97,7 +97,7 @@ function renderInlineText(text: string, linkedProducts: LinkedProduct[]): string
 
 function buildTextParagraph(lines: string[], linkedProducts: LinkedProduct[]): string {
   const renderedLines = lines.map((line) => renderInlineText(line, linkedProducts));
-  return `<p>${renderedLines.join("<br />")}</p>`;
+  return `<p style="margin: 0 0 16px 0;">${renderedLines.join("<br />")}</p>`;
 }
 
 export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = {}): string {
@@ -118,7 +118,7 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
     }
 
     if (pendingSpacer && blocks.length > 0) {
-      blocks.push("<p>&nbsp;</p>");
+      blocks.push('<p style="margin: 0 0 16px 0;"><br /></p>');
       pendingSpacer = false;
     }
 
@@ -140,7 +140,7 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
     if (options.embedDirectImageLinks && isDirectImageUrl(trimmedLine)) {
       flushTextBuffer();
       if (pendingSpacer && blocks.length > 0) {
-        blocks.push("<p>&nbsp;</p>");
+        blocks.push('<p style="margin: 0 0 16px 0;"><br /></p>');
         pendingSpacer = false;
       }
       blocks.push(buildCenteredImage(trimmedLine));
@@ -156,6 +156,6 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 }
 
 export function prependImageUrlToHtml(contentHtml: string, imageUrl: string): string {
-  const featureImageHtml = `<p style="text-align:center;"><img src="${escapeHtml(imageUrl)}" alt="Feature image" /></p>`;
+  const featureImageHtml = `<p style="text-align:center; margin: 0 0 16px 0;"><img src="${escapeHtml(imageUrl)}" alt="Feature image" /></p>`;
   return `${featureImageHtml}${contentHtml}`;
 }
