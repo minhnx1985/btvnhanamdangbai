@@ -74,9 +74,6 @@ function tokenizeLinkedText(text: string, linkedProducts: LinkedProduct[]): Text
         });
       }
 
-      if (lastIndex === 0) {
-        nextTokens.push(token);
-      }
     }
 
     tokens = nextTokens;
@@ -113,10 +110,16 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
   const blocks: string[] = [];
   const textBuffer: string[] = [];
   const lines = normalized.split("\n");
+  let pendingSpacer = false;
 
   const flushTextBuffer = (): void => {
     if (textBuffer.length === 0) {
       return;
+    }
+
+    if (pendingSpacer && blocks.length > 0) {
+      blocks.push("<p>&nbsp;</p>");
+      pendingSpacer = false;
     }
 
     blocks.push(buildTextParagraph(textBuffer, linkedProducts));
@@ -128,11 +131,18 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 
     if (!trimmedLine) {
       flushTextBuffer();
+      if (blocks.length > 0) {
+        pendingSpacer = true;
+      }
       continue;
     }
 
     if (options.embedDirectImageLinks && isDirectImageUrl(trimmedLine)) {
       flushTextBuffer();
+      if (pendingSpacer && blocks.length > 0) {
+        blocks.push("<p>&nbsp;</p>");
+        pendingSpacer = false;
+      }
       blocks.push(buildCenteredImage(trimmedLine));
       continue;
     }
