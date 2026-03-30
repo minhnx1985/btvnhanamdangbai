@@ -27,7 +27,7 @@ function isDirectImageUrl(text: string): boolean {
 }
 
 function buildCenteredImage(url: string): string {
-  return `<p style="text-align:center;"><img src="${escapeHtml(url)}" alt="" /></p>`;
+  return `<div style="text-align:center;"><img src="${escapeHtml(url)}" alt="" /></div>`;
 }
 
 function tokenizeLinkedText(text: string, linkedProducts: LinkedProduct[]): TextToken[] {
@@ -97,7 +97,7 @@ function renderInlineText(text: string, linkedProducts: LinkedProduct[]): string
 
 function buildTextParagraph(lines: string[], linkedProducts: LinkedProduct[]): string {
   const renderedLines = lines.map((line) => renderInlineText(line, linkedProducts));
-  return `<p>${renderedLines.join("<br />")}</p>`;
+  return `<div>${renderedLines.join("<br />")}</div>`;
 }
 
 export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = {}): string {
@@ -118,7 +118,7 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
     }
 
     if (pendingSpacer && blocks.length > 0) {
-      blocks.push("<br />");
+      blocks.push("<div><br /></div>");
       pendingSpacer = false;
     }
 
@@ -140,7 +140,7 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
     if (options.embedDirectImageLinks && isDirectImageUrl(trimmedLine)) {
       flushTextBuffer();
       if (pendingSpacer && blocks.length > 0) {
-        blocks.push("<br />");
+        blocks.push("<div><br /></div>");
         pendingSpacer = false;
       }
       blocks.push(buildCenteredImage(trimmedLine));
@@ -156,6 +156,6 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 }
 
 export function prependImageUrlToHtml(contentHtml: string, imageUrl: string): string {
-  const featureImageHtml = `<p style="text-align:center;"><img src="${escapeHtml(imageUrl)}" alt="Feature image" /></p>`;
-  return `${featureImageHtml}<br />${contentHtml}`;
+  const featureImageHtml = `<div style="text-align:center;"><img src="${escapeHtml(imageUrl)}" alt="Feature image" /></div>`;
+  return `${featureImageHtml}<div><br /></div>${contentHtml}`;
 }
