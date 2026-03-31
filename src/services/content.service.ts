@@ -9,6 +9,8 @@ type TextToken =
   | { type: "text"; value: string }
   | { type: "link"; value: string; href: string };
 
+const PARAGRAPH_SPACER = "<br />&nbsp;<br />";
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -150,7 +152,7 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 
   for (const block of blocks) {
     if (outputBlocks.length > 0) {
-      outputBlocks.push("<br /><br />");
+      outputBlocks.push(PARAGRAPH_SPACER);
     }
 
     outputBlocks.push(block);
@@ -161,5 +163,5 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 
 export function prependImageUrlToHtml(contentHtml: string, imageUrl: string): string {
   const featureImageHtml = `<div style="text-align:center;"><img src="${escapeHtml(imageUrl)}" alt="Feature image" /></div>`;
-  return `${featureImageHtml}<br /><br />${contentHtml}`;
+  return `${featureImageHtml}${PARAGRAPH_SPACER}${contentHtml}`;
 }
