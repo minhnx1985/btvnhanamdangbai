@@ -97,7 +97,7 @@ function renderInlineText(text: string, linkedProducts: LinkedProduct[]): string
 
 function buildTextParagraph(lines: string[], linkedProducts: LinkedProduct[]): string {
   const renderedLines = lines.map((line) => renderInlineText(line, linkedProducts));
-  return `<div>${renderedLines.join("<br />")}</div>`;
+  return renderedLines.join("<br />");
 }
 
 export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = {}): string {
@@ -117,11 +117,6 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
       return;
     }
 
-    if (pendingSpacer && blocks.length > 0) {
-      blocks.push("<div><br /></div>");
-      pendingSpacer = false;
-    }
-
     blocks.push(buildTextParagraph(textBuffer, linkedProducts));
     textBuffer.length = 0;
   };
@@ -139,8 +134,7 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 
     if (options.embedDirectImageLinks && isDirectImageUrl(trimmedLine)) {
       flushTextBuffer();
-      if (pendingSpacer && blocks.length > 0) {
-        blocks.push("<div><br /></div>");
+      if (pendingSpacer) {
         pendingSpacer = false;
       }
       blocks.push(buildCenteredImage(trimmedLine));
@@ -152,10 +146,20 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 
   flushTextBuffer();
 
-  return blocks.join("");
+  const outputBlocks: string[] = [];
+
+  for (const block of blocks) {
+    if (outputBlocks.length > 0) {
+      outputBlocks.push("<br /><br />");
+    }
+
+    outputBlocks.push(block);
+  }
+
+  return outputBlocks.join("");
 }
 
 export function prependImageUrlToHtml(contentHtml: string, imageUrl: string): string {
   const featureImageHtml = `<div style="text-align:center;"><img src="${escapeHtml(imageUrl)}" alt="Feature image" /></div>`;
-  return `${featureImageHtml}<div><br /></div>${contentHtml}`;
+  return `${featureImageHtml}<br /><br />${contentHtml}`;
 }
