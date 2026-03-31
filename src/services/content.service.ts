@@ -9,7 +9,7 @@ type TextToken =
   | { type: "text"; value: string }
   | { type: "link"; value: string; href: string };
 
-const PARAGRAPH_SPACER = "<br />&nbsp;<br />";
+const PARAGRAPH_SPACER = "<br /><br /><br />";
 
 function escapeHtml(text: string): string {
   return text
