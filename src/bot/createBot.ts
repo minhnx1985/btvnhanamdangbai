@@ -78,6 +78,11 @@ export function createBot(): Telegraf<Context> {
       return;
     }
 
+    if (session.state === "waiting_keywords") {
+      await ctx.reply(messages.waitKeywordsText);
+      return;
+    }
+
     await ctx.reply(messages.genericStartFlow);
   });
 

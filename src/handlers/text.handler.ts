@@ -29,6 +29,34 @@ function isSkipProductLinkInput(text: string): boolean {
   return normalized === "bo qua" || normalized === "bỏ qua" || normalized === "skip";
 }
 
+function isSkipKeywordsInput(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  const compact = normalized.replace(/[.!?…]+/g, "").replace(/\s+/g, " ").trim();
+
+  return (
+    normalized === "." ||
+    ["k", "ko", "khong", "không"].includes(compact) ||
+    compact.startsWith("khong co") ||
+    compact.startsWith("không có")
+  );
+}
+
+function parseKeywordTags(text: string): string[] {
+  return text
+    .split(",")
+    .map((keyword) => keyword.trim())
+    .filter(Boolean);
+}
+
+function mergeTags(existingTag: string | undefined, keywords: string[]): string | undefined {
+  const merged = [
+    ...(existingTag ? [existingTag] : []),
+    ...keywords
+  ].filter(Boolean);
+
+  return merged.length > 0 ? merged.join(", ") : undefined;
+}
+
 export async function submitDraftPost(
   ctx: Context,
   userId: number,
@@ -139,40 +167,79 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       }
 
       if (isSkipProductLinkInput(text)) {
-        await submitDraftPost(ctx, userId, {
+        setSession(userId, {
+          state: "waiting_keywords",
+          postType: "blog",
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType,
-          postType: "blog"
+          imageMimeType: session.imageMimeType
         });
+        await ctx.reply(messages.askKeywords);
         return;
       }
 
       try {
         const resolvedProducts = await sapoService.resolveProductLinks(text);
+        setSession(userId, {
+          state: "waiting_keywords",
+          postType: "blog",
+          title: session.title,
+          content: session.content,
+          imageBase64: session.imageBase64,
+          imageMimeType: session.imageMimeType,
+          productTag: resolvedProducts.tag,
+          linkedProducts: resolvedProducts.linkedProducts
+        });
+        await ctx.reply(messages.askKeywords);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Skip invalid product links";
+        logger.warn("product link resolution failed", { userId, reason: message });
+        setSession(userId, {
+          state: "waiting_keywords",
+          postType: "blog",
+          title: session.title,
+          content: session.content,
+          imageBase64: session.imageBase64,
+          imageMimeType: session.imageMimeType
+        });
+        await ctx.reply(messages.askKeywords);
+        return;
+      }
+    }
+
+    if (session.state === "waiting_keywords") {
+      if (!session.title || !session.content || !session.imageBase64 || !session.imageMimeType) {
+        resetSession(userId);
+        await ctx.reply("❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại");
+        return;
+      }
+
+      if (isSkipKeywordsInput(text)) {
         await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
           postType: "blog",
-          tags: resolvedProducts.tag,
-          linkedProducts: resolvedProducts.linkedProducts
-        });
-        return;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Skip invalid product links";
-        logger.warn("product link resolution failed", { userId, reason: message });
-        await submitDraftPost(ctx, userId, {
-          title: session.title,
-          content: session.content,
-          imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType,
-          postType: "blog"
+          tags: session.productTag,
+          linkedProducts: session.linkedProducts
         });
         return;
       }
+
+      const keywordTags = parseKeywordTags(text);
+      await submitDraftPost(ctx, userId, {
+        title: session.title,
+        content: session.content,
+        imageBase64: session.imageBase64,
+        imageMimeType: session.imageMimeType,
+        postType: "blog",
+        tags: mergeTags(session.productTag, keywordTags),
+        linkedProducts: session.linkedProducts
+      });
+      return;
     }
 
     await ctx.reply(messages.genericStartFlow);

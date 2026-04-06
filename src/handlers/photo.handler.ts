@@ -41,6 +41,11 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
     return;
   }
 
+  if (session.state === "waiting_keywords") {
+    await ctx.reply(messages.waitKeywordsText);
+    return;
+  }
+
   if (session.state !== "waiting_image" && session.state !== "waiting_content") {
     await ctx.reply(messages.genericStartFlow);
     return;

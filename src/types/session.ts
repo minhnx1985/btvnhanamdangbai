@@ -1,9 +1,12 @@
+import { LinkedProduct } from "./sapo";
+
 export type SessionState =
   | "idle"
   | "waiting_title"
   | "waiting_content"
   | "waiting_image"
-  | "waiting_product_link";
+  | "waiting_product_link"
+  | "waiting_keywords";
 
 export type PostType = "blog" | "author";
 
@@ -15,4 +18,5 @@ export type PostSession = {
   imageBase64?: string;
   imageMimeType?: string;
   productTag?: string;
+  linkedProducts?: LinkedProduct[];
 };

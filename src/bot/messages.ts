@@ -13,7 +13,8 @@ export const messages = {
     "2. Gửi một hoặc nhiều tin nhắn nội dung",
     "3. Gửi ảnh feature",
     "4. Gửi link sản phẩm hoặc BO QUA",
-    "5. Bot tạo bài nháp tự động",
+    "5. Gửi từ khóa hoặc bỏ qua",
+    "6. Bot tạo bài nháp tự động",
     "",
     "Flow tác giả:",
     "1. Gửi tiêu đề",
@@ -28,12 +29,16 @@ export const messages = {
   contentAppended: "Đã nhận thêm nội dung. Bạn có thể gửi tiếp hoặc gửi ảnh feature để sang bước tiếp theo.",
   askImage: "Gửi ảnh feature",
   askProductLink:
-    "Gửi link sản phẩm dạng https://nhanam.vn/... để gắn tag cho bài viết, hoặc trả lời BO QUA để đăng bài không kèm sản phẩm.",
+    "Gửi link sản phẩm dạng https://nhanam.vn/... để gắn tag cho bài viết, hoặc trả lời BO QUA để bỏ qua.",
+  askKeywords:
+    "Có từ khóa gì không? Nếu có, hãy gửi các từ khóa cách nhau bằng dấu phẩy (,). Nếu không có thì trả lời: khong, không, ko, k, không có từ khóa, hoặc chỉ gửi dấu chấm .",
   cancelCurrentAction: "❌ Đã hủy thao tác hiện tại",
   waitTitleText: "Hiện tại tôi đang chờ tiêu đề bài viết. Vui lòng gửi tiêu đề bằng text.",
   waitContentText: "Hiện tại tôi đang chờ nội dung bài viết. Vui lòng gửi nội dung bằng text.",
   waitImagePhoto: "Hiện tại tôi đang chờ ảnh feature. Vui lòng gửi 1 ảnh.",
   waitProductLinkText:
     "Hiện tại tôi đang chờ link sản phẩm dạng https://nhanam.vn/... hoặc tin nhắn BO QUA để tiếp tục.",
+  waitKeywordsText:
+    "Hiện tại tôi đang chờ từ khóa cách nhau bằng dấu phẩy, hoặc tin nhắn khong/không/ko/k/. để bỏ qua.",
   submitting: "Đang tạo bài nháp..."
 } as const;
