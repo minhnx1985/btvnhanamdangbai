@@ -9,7 +9,8 @@ type TextToken =
   | { type: "text"; value: string }
   | { type: "link"; value: string; href: string };
 
-const PARAGRAPH_SPACER = "<br />";
+const PARAGRAPH_SPACER = "";
+const FEATURE_IMAGE_SPACER = "";
 
 function escapeHtml(text: string): string {
   return text
@@ -163,5 +164,5 @@ export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = 
 
 export function prependImageUrlToHtml(contentHtml: string, imageUrl: string): string {
   const featureImageHtml = `<div style="text-align:center;"><img src="${escapeHtml(imageUrl)}" alt="Feature image" /></div>`;
-  return `${featureImageHtml}${PARAGRAPH_SPACER}${contentHtml}`;
+  return `${featureImageHtml}${FEATURE_IMAGE_SPACER}${contentHtml}`;
 }
