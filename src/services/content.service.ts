@@ -99,7 +99,7 @@ function renderInlineText(text: string, linkedProducts: LinkedProduct[]): string
 
 function buildTextParagraph(lines: string[], linkedProducts: LinkedProduct[]): string {
   const renderedLines = lines.map((line) => renderInlineText(line, linkedProducts));
-  return renderedLines.join("<br />");
+  return `<div style="line-height: 1.35;">${renderedLines.join("<br />")}</div>`;
 }
 
 export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = {}): string {
