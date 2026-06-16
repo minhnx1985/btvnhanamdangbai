@@ -2,6 +2,7 @@ import axios from "axios";
 import { BookDNA, NormalizedSapoProduct } from "../types/product-seo.types";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
+import { getBookDnaMarketingStrategyPrompt } from "./book-dna-marketing-strategy.service";
 import { shopApiService, ShopApiChatMessage } from "./shopapi.service";
 
 type BookDNAInput = {
@@ -47,6 +48,8 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
         "Mandatory flow before writing:",
         "Product Data -> Book Understanding -> Positioning -> Framework Selection -> Writing.",
         "This step must complete Book Understanding, Positioning, and Framework Selection only. Do not write product description in this step.",
+        "",
+        getBookDnaMarketingStrategyPrompt(),
         "",
         "Required understanding fields:",
         "- Reader DNA: who actually reads or experiences the book.",
@@ -184,6 +187,8 @@ export async function enrichBookDNA(input: HumanEnrichmentInput): Promise<{
         "Mandatory flow:",
         "Book DNA -> Human Enrichment -> Final Book Understanding -> Writing.",
         "This step is Human Enrichment and Final Book Understanding only. Do not write product description.",
+        "",
+        getBookDnaMarketingStrategyPrompt(),
         "",
         "Possible data types:",
         "- plain note",

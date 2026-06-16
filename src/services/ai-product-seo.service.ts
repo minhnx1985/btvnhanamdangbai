@@ -1,6 +1,7 @@
 import { shopApiService, ShopApiChatMessage } from "./shopapi.service";
 import { ProductSeoMarketingInput, ProductSeoMarketingResult } from "../types/product-seo.types";
 import { AppError } from "../utils/errors";
+import { getBookDnaMarketingStrategyPrompt } from "./book-dna-marketing-strategy.service";
 import { stripHtml } from "./product-audit.service";
 
 const ALLOWED_HTML_TAGS = new Set(["p", "h2", "h3", "strong", "em", "ul", "li"]);
@@ -68,6 +69,8 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
         "- Follow this exact flow: Product Data -> Book Understanding -> Positioning -> Framework Selection -> Writing.",
         "- Do not write from metadata. Metadata can appear only as support or final publication information.",
         "- Do not write unless Book DNA has Reader DNA, Buyer DNA, Reading Experience, Core Promise, Competitive Advantage, Positioning Statement, and Selected Framework.",
+        "",
+        getBookDnaMarketingStrategyPrompt(),
         "- First determine the objective: awareness, traffic, engagement, conversion, preorder, or brand building.",
         "- Then determine the audience from Book DNA: literary readers, general readers, parents, teachers, children, nonfiction readers, economics/politics readers, existing fans, or cold audience.",
         "- Then determine the platform. For this task, the platform is the Nha Nam product page / landing page.",
