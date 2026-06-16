@@ -13,14 +13,15 @@ export const messages = {
     "2. Gửi một hoặc nhiều tin nhắn nội dung",
     "3. Gửi ảnh feature",
     "4. Gửi link sản phẩm hoặc BO QUA",
-    "5. Gửi từ khóa hoặc bỏ qua",
-    "6. Bot tạo bài nháp tự động",
+    "5. Chọn có format bằng AI không",
+    "6. Bot tự tạo từ khóa và tạo bài nháp",
     "",
     "Flow tác giả:",
     "1. Gửi tiêu đề",
     "2. Gửi một hoặc nhiều tin nhắn nội dung",
     "3. Gửi ảnh feature",
-    "4. Bot tạo bài nháp ở mục Tác giả"
+    "4. Chọn có format bằng AI không",
+    "5. Bot tạo bài nháp ở mục Tác giả"
   ].join("\n"),
   genericStartFlow: "Gõ /newpost để tạo bài blog hoặc /author để tạo bài tác giả",
   askTitle: "Gửi tiêu đề bài viết",
@@ -32,6 +33,7 @@ export const messages = {
     "Gửi link sản phẩm dạng https://nhanam.vn/... để gắn tag cho bài viết, hoặc trả lời BO QUA để bỏ qua.",
   askKeywords:
     "Có từ khóa gì không? Nếu có, hãy gửi các từ khóa cách nhau bằng dấu phẩy (,). Nếu không có thì trả lời: khong, không, ko, k, không có từ khóa, hoặc chỉ gửi dấu chấm .",
+  askAiFormat: "Có muốn format nội dung bằng AI trước khi tạo nháp không? Trả lời CO hoặc KHONG.",
   cancelCurrentAction: "❌ Đã hủy thao tác hiện tại",
   waitTitleText: "Hiện tại tôi đang chờ tiêu đề bài viết. Vui lòng gửi tiêu đề bằng text.",
   waitContentText: "Hiện tại tôi đang chờ nội dung bài viết. Vui lòng gửi nội dung bằng text.",
@@ -40,5 +42,7 @@ export const messages = {
     "Hiện tại tôi đang chờ link sản phẩm dạng https://nhanam.vn/... hoặc tin nhắn BO QUA để tiếp tục.",
   waitKeywordsText:
     "Hiện tại tôi đang chờ từ khóa cách nhau bằng dấu phẩy, hoặc tin nhắn khong/không/ko/k/. để bỏ qua.",
+  waitAiFormatChoiceText: "Hiện tại tôi đang chờ lựa chọn format AI. Vui lòng trả lời CO hoặc KHONG.",
+  formattingWithAi: "Đang format nội dung bằng AI...",
   submitting: "Đang tạo bài nháp..."
 } as const;

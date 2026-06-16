@@ -65,6 +65,9 @@ export const config = {
   sapoAuthorBlogName: process.env.SAPO_AUTHOR_BLOG_NAME?.trim() || "Tác giả",
   sapoAuthorTemplateLayout: process.env.SAPO_AUTHOR_TEMPLATE_LAYOUT?.trim() || "article.author",
   sapoProductUrlHost: process.env.SAPO_PRODUCT_URL_HOST?.trim().toLowerCase() || "nhanam.vn",
+  shopApiBaseUrl: process.env.SHOPAPI_BASE_URL?.trim().replace(/\/$/, "") || "https://api.shopaikey.com/v1",
+  shopApiKey: process.env.SHOPAPI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim() || "",
+  shopApiModel: process.env.SHOPAPI_MODEL?.trim() || process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini",
   allowedUserIds: parseAllowedUserIds(process.env.BOT_ALLOWED_USER_IDS)
 } as const;
 

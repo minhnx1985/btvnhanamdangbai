@@ -4,6 +4,7 @@ import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { plainTextToHtml } from "../services/content.service";
 import { sapoService } from "../services/sapo.service";
+import { shopApiService } from "../services/shopapi.service";
 import { LinkedProduct } from "../types/sapo";
 import { PostType } from "../types/session";
 import { logger } from "../utils/logger";
@@ -23,6 +24,7 @@ type DraftSubmissionInput = {
   postType: PostType;
   tags?: string;
   linkedProducts?: LinkedProduct[];
+  useAiFormat?: boolean;
 };
 
 function isSkipProductLinkInput(text: string): boolean {
@@ -58,6 +60,31 @@ function mergeTags(existingTag: string | undefined, keywords: string[]): string 
   return merged.length > 0 ? merged.join(", ") : undefined;
 }
 
+function isYesInput(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return ["co", "có", "yes", "y", "ok", "okay"].includes(normalized);
+}
+
+function isNoInput(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return ["khong", "không", "ko", "k", "no", "n"].includes(normalized);
+}
+
+async function generateAutomaticTags(input: DraftSubmissionInput): Promise<string | undefined> {
+  try {
+    const keywords = await shopApiService.generateKeywordTags({
+      title: input.title,
+      content: input.content
+    });
+
+    return mergeTags(input.tags, keywords);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Không tạo được từ khóa tự động";
+    logger.warn("automatic keyword generation skipped", { reason, postType: input.postType });
+    return input.tags;
+  }
+}
+
 export async function submitDraftPost(
   ctx: Context,
   userId: number,
@@ -69,17 +96,23 @@ export async function submitDraftPost(
   const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
 
   try {
-    const contentHtml = plainTextToHtml(input.content, {
-      embedDirectImageLinks: !isAuthorPost,
-      linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
-    });
+    const contentHtml = input.useAiFormat
+      ? await shopApiService.formatContentHtml({
+        title: input.title,
+        content: input.content
+      })
+      : plainTextToHtml(input.content, {
+        embedDirectImageLinks: !isAuthorPost,
+        linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
+      });
+    const tags = await generateAutomaticTags(input);
 
     const result = await sapoService.createDraftArticle({
       title: input.title,
       content: contentHtml,
       imageBase64: input.imageBase64,
       imageMimeType: input.imageMimeType,
-      tags: input.tags,
+      tags,
       blogName,
       templateLayout: isAuthorPost ? config.sapoAuthorTemplateLayout : undefined,
       prependFeatureImageInContent: !isAuthorPost
@@ -90,7 +123,7 @@ export async function submitDraftPost(
       articleId: result.id,
       title: result.title,
       postType: input.postType,
-      tags: input.tags ?? "",
+      tags: tags ?? "",
       linkedProducts: input.linkedProducts?.length ?? 0
     });
     resetSession(userId);
@@ -102,8 +135,8 @@ export async function submitDraftPost(
       `- Article ID: ${result.id}`
     ];
 
-    if (input.tags) {
-      lines.push(`- Tag: ${input.tags}`);
+    if (tags) {
+      lines.push(`- Tag: ${tags}`);
     }
 
     await replySafely(ctx, lines.join("\n"), { userId, postType: input.postType, articleId: result.id });
@@ -169,43 +202,44 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
 
       if (isSkipProductLinkInput(text)) {
         setSession(userId, {
-          state: "waiting_keywords",
+          state: "waiting_ai_format_choice",
           postType: "blog",
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType
         });
-        await replySafely(ctx, messages.askKeywords, { userId });
+        await replySafely(ctx, messages.askAiFormat, { userId });
         return;
       }
 
       try {
         const resolvedProducts = await sapoService.resolveProductLinks(text);
         setSession(userId, {
-          state: "waiting_keywords",
+          state: "waiting_ai_format_choice",
           postType: "blog",
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
+          tags: resolvedProducts.tag,
           productTag: resolvedProducts.tag,
           linkedProducts: resolvedProducts.linkedProducts
         });
-        await replySafely(ctx, messages.askKeywords, { userId });
+        await replySafely(ctx, messages.askAiFormat, { userId });
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Skip invalid product links";
         logger.warn("product link resolution failed", { userId, reason: message });
         setSession(userId, {
-          state: "waiting_keywords",
+          state: "waiting_ai_format_choice",
           postType: "blog",
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType
         });
-        await replySafely(ctx, messages.askKeywords, { userId });
+        await replySafely(ctx, messages.askAiFormat, { userId });
         return;
       }
     }
@@ -218,27 +252,64 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       }
 
       if (isSkipKeywordsInput(text)) {
-        await submitDraftPost(ctx, userId, {
+        setSession(userId, {
+          state: "waiting_ai_format_choice",
+          postType: "blog",
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
-          postType: "blog",
           tags: session.productTag,
+          productTag: session.productTag,
           linkedProducts: session.linkedProducts
         });
+        await replySafely(ctx, messages.askAiFormat, { userId });
         return;
       }
 
       const keywordTags = parseKeywordTags(text);
+      const tags = mergeTags(session.productTag, keywordTags);
+      setSession(userId, {
+        state: "waiting_ai_format_choice",
+        postType: "blog",
+        title: session.title,
+        content: session.content,
+        imageBase64: session.imageBase64,
+        imageMimeType: session.imageMimeType,
+        tags,
+        productTag: session.productTag,
+        linkedProducts: session.linkedProducts
+      });
+      await replySafely(ctx, messages.askAiFormat, { userId });
+      return;
+    }
+
+    if (session.state === "waiting_ai_format_choice") {
+      if (!session.title || !session.content || !session.imageBase64 || !session.imageMimeType || !session.postType) {
+        resetSession(userId);
+        await replySafely(ctx, "❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại", { userId });
+        return;
+      }
+
+      if (!isYesInput(text) && !isNoInput(text)) {
+        await replySafely(ctx, messages.waitAiFormatChoiceText, { userId });
+        return;
+      }
+
+      const useAiFormat = isYesInput(text);
+      if (useAiFormat) {
+        await replySafely(ctx, messages.formattingWithAi, { userId, postType: session.postType });
+      }
+
       await submitDraftPost(ctx, userId, {
         title: session.title,
         content: session.content,
         imageBase64: session.imageBase64,
         imageMimeType: session.imageMimeType,
-        postType: "blog",
-        tags: mergeTags(session.productTag, keywordTags),
-        linkedProducts: session.linkedProducts
+        postType: session.postType,
+        tags: session.tags ?? session.productTag,
+        linkedProducts: session.linkedProducts,
+        useAiFormat
       });
       return;
     }

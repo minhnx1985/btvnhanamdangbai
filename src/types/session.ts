@@ -6,7 +6,8 @@ export type SessionState =
   | "waiting_content"
   | "waiting_image"
   | "waiting_product_link"
-  | "waiting_keywords";
+  | "waiting_keywords"
+  | "waiting_ai_format_choice";
 
 export type PostType = "blog" | "author";
 
@@ -17,6 +18,7 @@ export type PostSession = {
   content?: string;
   imageBase64?: string;
   imageMimeType?: string;
+  tags?: string;
   productTag?: string;
   linkedProducts?: LinkedProduct[];
 };

@@ -86,6 +86,11 @@ export function createBot(): Telegraf<Context> {
       return;
     }
 
+    if (session.state === "waiting_ai_format_choice") {
+      await replySafely(ctx, messages.waitAiFormatChoiceText, { userId });
+      return;
+    }
+
     await replySafely(ctx, messages.genericStartFlow, { userId });
   });
 

@@ -7,6 +7,7 @@ Bot Telegram nhan tieu de, noi dung va anh feature, sau do tao bai viet blog tre
 - Node.js 20+
 - Tai khoan Telegram de tao bot voi BotFather
 - Sapo private app credentials
+- ShopAPI key de format AI va tao tu khoa tu dong
 
 ## Cai dat
 
@@ -52,6 +53,10 @@ SAPO_API_KEY=
 SAPO_API_SECRET=
 SAPO_DEFAULT_BLOG_NAME=Biên tập viên giới thiệu
 
+SHOPAPI_BASE_URL=https://api.shopaikey.com/v1
+SHOPAPI_API_KEY=
+SHOPAPI_MODEL=gpt-4o-mini
+
 BOT_ALLOWED_USER_IDS=
 ```
 
@@ -95,6 +100,9 @@ npm run start
    - `SAPO_API_KEY`
    - `SAPO_API_SECRET`
    - `SAPO_DEFAULT_BLOG_NAME=Biên tập viên giới thiệu`
+   - `SHOPAPI_BASE_URL=https://api.shopaikey.com/v1`
+   - `SHOPAPI_API_KEY`
+   - `SHOPAPI_MODEL=gpt-4o-mini`
    - `BOT_ALLOWED_USER_IDS` (de trong neu muon mo cho tat ca user)
 6. Deploy service.
 
@@ -112,6 +120,7 @@ Project da co san file `render.yaml`.
    - `SAPO_BASE_URL`
    - `SAPO_API_KEY`
    - `SAPO_API_SECRET`
+   - `SHOPAPI_API_KEY`
    - `BOT_ALLOWED_USER_IDS` (de trong neu muon mo cho tat ca user)
 
 Luu y:
@@ -138,14 +147,16 @@ Luu y:
 2. Gui tieu de
 3. Gui noi dung
 4. Gui anh feature
-5. Xac nhan bang `Y` hoac `N`
+5. Gui link san pham hoac `BO QUA`
+6. Chon co format bang AI khong bang `CO` hoac `KHONG`
 
-Neu xac nhan `Y`, bot se tao bai viet nhap trong blog mac dinh va tra ket qua ve Telegram.
+Bot se tu tao tu khoa bang ShopAPI, merge voi tag san pham neu co, tao bai viet nhap trong blog mac dinh va tra ket qua ve Telegram.
 
 ## Troubleshooting
 
 - `Bạn không có quyền sử dụng bot này.`: Kiem tra `BOT_ALLOWED_USER_IDS`.
 - `Sapo API xác thực thất bại`: Kiem tra `SAPO_API_KEY` va `SAPO_API_SECRET`.
 - `Không tìm thấy blog mặc định trên Sapo`: Kiem tra `SAPO_DEFAULT_BLOG_NAME`.
+- `Thiếu SHOPAPI_API_KEY để dùng AI`: Them `SHOPAPI_API_KEY` tren Render hoac trong `.env`.
 - `Không thể xử lý ảnh dưới 1MB`: Thu anh nho hon hoac anh it chi tiet hon.
 - Bot khong nhan webhook: Kiem tra `TELEGRAM_WEBHOOK_URL`, SSL, va route `/telegram/webhook`.
