@@ -6,7 +6,12 @@ import { handleAuthor } from "../handlers/author.handler";
 import { handleCancel } from "../handlers/cancel.handler";
 import { handleNewPost } from "../handlers/newpost.handler";
 import { handlePhotoMessage } from "../handlers/photo.handler";
-import { handleProductSeoCallback, handleSeoCommand } from "../handlers/product-seo.handler";
+import {
+  handleInspectProductCommand,
+  handleProductSeoCallback,
+  handleSeoCommand,
+  handleTestUpdateCommand
+} from "../handlers/product-seo.handler";
 import { handleStart } from "../handlers/start.handler";
 import { handleTextMessage } from "../handlers/text.handler";
 import { getSession } from "./sessionStore";
@@ -36,6 +41,8 @@ export function createBot(): Telegraf<Context> {
   bot.command("author", handleAuthor);
   bot.command("cancel", handleCancel);
   bot.command("seo", handleSeoCommand);
+  bot.command("inspectproduct", handleInspectProductCommand);
+  bot.command("testupdate", handleTestUpdateCommand);
   bot.on("callback_query", handleProductSeoCallback);
 
   bot.on("text", async (ctx) => {

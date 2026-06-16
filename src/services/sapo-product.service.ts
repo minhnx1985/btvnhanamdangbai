@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import axios, { AxiosError, AxiosInstance } from "axios";
 import { config } from "../config/env";
 import { NormalizedSapoProduct } from "../types/product-seo.types";
@@ -10,9 +11,8 @@ type RawSapoProduct = Record<string, unknown> & {
   name?: string;
   alias?: string;
   handle?: string;
-  body_html?: string;
-  bodyHtml?: string;
-  description?: string;
+  content?: string;
+  summary?: string;
   vendor?: string;
   product_type?: string;
   productType?: string;
@@ -32,13 +32,19 @@ type ProductListResponse = {
   product?: RawSapoProduct | RawSapoProduct[];
 };
 
-type ProductUpdateResponse = {
+type ProductResponse = {
   product?: RawSapoProduct;
+};
+
+export type ProductInspectResult = {
+  product: NormalizedSapoProduct;
+  contentLength: number;
+  summaryLength: number;
+  possibleSeoFields: Array<{ field: string; exists: boolean }>;
 };
 
 class SapoProductService {
   private readonly client: AxiosInstance;
-  private readonly descriptionFieldCache = new Map<string, "body_html" | "description">();
 
   constructor() {
     this.client = axios.create({
@@ -57,37 +63,104 @@ class SapoProductService {
 
   async findProductByAlias(alias: string): Promise<NormalizedSapoProduct | null> {
     try {
-      const response = await this.client.get<ProductListResponse>(`/admin/products.json?alias=${encodeURIComponent(alias)}`);
-      const products = normalizeProductList(response.data);
-      const product = products.find((item) => getProductAlias(item) === alias) ?? products[0];
+      const candidates = await this.fetchProductCandidates(alias);
+      const product = candidates.find((item) => getProductAlias(item) === alias);
 
       if (!product) {
         logger.warn("sapo_product_not_found", { alias });
         return null;
       }
 
-      logger.info("sapo_product_found", { productId: product.id, alias });
-      if (product.id) {
-        this.descriptionFieldCache.set(String(product.id), getDescriptionField(product));
-      }
+      logger.info("sapo_product_found", {
+        productId: product.id,
+        title: product.title ?? product.name,
+        alias: getProductAlias(product)
+      });
       return normalizeProduct(product);
     } catch (error) {
       throw mapSapoProductError(error);
     }
   }
 
-  async updateProductDescription(productId: string | number, html: string): Promise<void> {
-    const descriptionField = this.descriptionFieldCache.get(String(productId)) ?? "body_html";
+  async getProduct(productId: string | number): Promise<NormalizedSapoProduct | null> {
     try {
-      await this.client.put<ProductUpdateResponse>(`/admin/products/${productId}.json`, {
-        product: {
-          id: productId,
-          [descriptionField]: html
-        }
-      });
+      const response = await this.client.get<ProductResponse>(`/admin/products/${productId}.json`);
+      return response.data.product ? normalizeProduct(response.data.product) : null;
     } catch (error) {
       throw mapSapoProductError(error);
     }
+  }
+
+  async inspectProductByAlias(alias: string): Promise<ProductInspectResult | null> {
+    const product = await this.findProductByAlias(alias);
+    if (!product) {
+      return null;
+    }
+
+    const raw = isRecord(product.raw) ? product.raw : {};
+    logger.info("sapo_product_inspect_raw", {
+      productId: product.id,
+      alias: product.alias ?? product.handle,
+      rawProduct: summarizeRawProduct(raw)
+    });
+
+    return {
+      product,
+      contentLength: product.content?.length ?? 0,
+      summaryLength: product.summary?.length ?? 0,
+      possibleSeoFields: ["seo_title", "meta_title", "seo_description", "meta_description", "page_title"].map((field) => ({
+        field,
+        exists: Object.prototype.hasOwnProperty.call(raw, field)
+      }))
+    };
+  }
+
+  async updateProductContent(
+    productId: string | number,
+    finalBodyHtml: string,
+    marker = `<!-- seo-bot-update:${randomUUID()} -->`,
+    logContext: Record<string, unknown> = {}
+  ): Promise<{ marker: string }> {
+    const htmlWithMarker = appendMarker(finalBodyHtml, marker);
+
+    try {
+      logger.info("sapo_product_content_update_started", { ...logContext, productId, marker });
+      await this.client.put<ProductResponse>(`/admin/products/${productId}.json`, {
+        product: {
+          id: productId,
+          content: htmlWithMarker
+        }
+      });
+      logger.info("sapo_product_content_update_put_ok", { ...logContext, productId, marker });
+
+      const updated = await this.getProduct(productId);
+      if (!updated?.content?.includes(marker)) {
+        logger.error("sapo_product_content_update_verify_failed", {
+          ...logContext,
+          productId,
+          marker,
+          contentLength: updated?.content?.length ?? 0
+        });
+        throw new AppError("Sapo returned OK but product.content was not changed", "SAPO_PRODUCT_CONTENT_VERIFY_FAILED");
+      }
+
+      logger.info("sapo_product_content_update_verified", {
+        ...logContext,
+        productId,
+        marker,
+        contentLength: updated.content.length
+      });
+      return { marker };
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw mapSapoProductError(error);
+    }
+  }
+
+  async updateProductDescription(productId: string | number, html: string): Promise<void> {
+    await this.updateProductContent(productId, html);
   }
 
   async updateProductSeoFields(
@@ -96,29 +169,73 @@ class SapoProductService {
   ): Promise<{ updated: boolean; reason?: string }> {
     return {
       updated: false,
-      reason: "Chưa xác định chắc field SEO trong Sapo API. Hiện chưa cập nhật SEO fields."
+      reason: "Hiện chưa xác định chắc field SEO trong Sapo Product API. Bot chưa cập nhật SEO fields."
     };
   }
 
   async updateProductDescriptionAndSeo(
     productId: string | number,
-    payload: { html: string; seoTitle: string; metaDescription: string }
+    payload: { html: string; seoTitle: string; metaDescription: string; marker?: string }
   ): Promise<{ descriptionUpdated: boolean; seoUpdated: boolean; reason?: string }> {
-    await this.updateProductDescription(productId, payload.html);
-    const seoResult = await this.updateProductSeoFields(productId, {
-      seoTitle: payload.seoTitle,
-      metaDescription: payload.metaDescription
-    });
+    await this.updateProductContent(productId, payload.html, payload.marker);
 
     return {
       descriptionUpdated: true,
-      seoUpdated: seoResult.updated,
-      reason: seoResult.reason
+      seoUpdated: false,
+      reason: "Hiện chưa xác định chắc field SEO trong Sapo Product API. Bot chưa cập nhật SEO fields."
     };
+  }
+
+  async testUpdateProductContent(productId: string | number): Promise<{ marker: string }> {
+    const product = await this.getProduct(productId);
+    if (!product) {
+      throw new AppError("Không tìm thấy sản phẩm trên Sapo", "SAPO_PRODUCT_NOT_FOUND");
+    }
+
+    const marker = `<!-- sapo-test-update:${Date.now()} -->`;
+    await this.updateProductContent(productId, product.content ?? "", marker);
+    return { marker };
+  }
+
+  private async fetchProductCandidates(alias: string): Promise<RawSapoProduct[]> {
+    const queries = [
+      `/admin/products.json?alias=${encodeURIComponent(alias)}`,
+      `/admin/products.json?handle=${encodeURIComponent(alias)}`,
+      `/admin/products.json?query=${encodeURIComponent(alias)}`,
+      "/admin/products.json?limit=250"
+    ];
+    const seen = new Set<string>();
+    const products: RawSapoProduct[] = [];
+
+    for (const query of queries) {
+      const response = await this.client.get<ProductListResponse>(query);
+      for (const product of normalizeProductList(response.data)) {
+        const key = product.id ? String(product.id) : `${getProductAlias(product) ?? ""}:${product.title ?? product.name ?? ""}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          products.push(product);
+        }
+      }
+
+      if (products.some((product) => getProductAlias(product) === alias)) {
+        return products;
+      }
+    }
+
+    return products;
   }
 }
 
+function appendMarker(html: string, marker: string): string {
+  const trimmed = html.trim();
+  return trimmed ? `${trimmed}\n${marker}` : marker;
+}
+
 function mapSapoProductError(error: unknown): AppError {
+  if (error instanceof AppError) {
+    return error;
+  }
+
   if (!axios.isAxiosError(error)) {
     return new AppError("Lỗi hệ thống khi thao tác sản phẩm Sapo", "SAPO_PRODUCT_UNKNOWN_ERROR");
   }
@@ -193,8 +310,8 @@ function normalizeProduct(product: RawSapoProduct): NormalizedSapoProduct {
     title: product.title ?? product.name ?? "",
     alias: product.alias,
     handle: product.handle,
-    bodyHtml: product.body_html ?? product.bodyHtml,
-    description: product.description,
+    content: product.content,
+    summary: product.summary,
     vendor: product.vendor,
     productType: product.product_type ?? product.productType,
     tags: normalizeTags(product.tags),
@@ -210,16 +327,32 @@ function normalizeProduct(product: RawSapoProduct): NormalizedSapoProduct {
   };
 }
 
-function getDescriptionField(product: RawSapoProduct): "body_html" | "description" {
-  if (typeof product.body_html === "string" || typeof product.bodyHtml === "string") {
-    return "body_html";
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-  if (typeof product.description === "string") {
-    return "description";
+function summarizeRawProduct(raw: Record<string, unknown>): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string") {
+      summary[key] = value.length > 500 ? `${value.slice(0, 500)}...` : value;
+    } else if (Array.isArray(value)) {
+      summary[key] = `[array:${value.length}]`;
+    } else if (isRecord(value)) {
+      summary[key] = `[object:${Object.keys(value).join(",")}]`;
+    } else {
+      summary[key] = value;
+    }
   }
-
-  return "body_html";
+  return summary;
 }
 
 export const sapoProductService = new SapoProductService();
+
+export async function findProductByAlias(alias: string): Promise<NormalizedSapoProduct | null> {
+  return sapoProductService.findProductByAlias(alias);
+}
+
+export async function updateProductContent(productId: string | number, finalBodyHtml: string): Promise<void> {
+  await sapoProductService.updateProductContent(productId, finalBodyHtml);
+}

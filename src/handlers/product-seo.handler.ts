@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Context } from "telegraf";
-import { auditProductSeoMarketing } from "../services/product-audit.service";
+import { analyzeBookDNA } from "../services/book-dna.service";
+import { auditProductSeoMarketing, stripHtml } from "../services/product-audit.service";
 import { generateProductSeoMarketing } from "../services/ai-product-seo.service";
-import { productResearchService } from "../services/product-research.service";
 import { extractNhanamProductAlias } from "../services/product-url.service";
 import { sapoProductService } from "../services/sapo-product.service";
 import {
@@ -14,6 +14,7 @@ import {
   saveProductSeoPendingJob
 } from "../services/product-seo-job-store.service";
 import { ProductSeoPendingJob } from "../types/product-seo.types";
+import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
 
@@ -29,6 +30,8 @@ type InlineKeyboardButton = {
 };
 
 const MAX_PREVIEW_LENGTH = 3400;
+const SEO_FIELDS_DISABLED_MESSAGE =
+  "Hiện chưa xác định chắc field SEO trong Sapo Product API. Bot chưa cập nhật SEO fields.";
 
 function getUserId(ctx: Context): number | undefined {
   return ctx.from?.id;
@@ -77,15 +80,12 @@ async function answerCallbackSafely(ctx: Context): Promise<void> {
   }
 }
 
-function truncatePreview(text: string): { text: string; truncated: boolean } {
+function truncatePreview(text: string): string {
   if (text.length <= MAX_PREVIEW_LENGTH) {
-    return { text, truncated: false };
+    return text;
   }
 
-  return {
-    text: `${text.slice(0, MAX_PREVIEW_LENGTH - 80).trim()}\n\nPreview đã được rút gọn do giới hạn Telegram.`,
-    truncated: true
-  };
+  return `${text.slice(0, MAX_PREVIEW_LENGTH - 80).trim()}\n\nPreview đã được rút gọn do giới hạn Telegram.`;
 }
 
 function buildProductUrl(alias: string): string {
@@ -108,6 +108,22 @@ function buildPreviewMessage(job: ProductSeoPendingJob): string {
     `Alias: ${job.productAlias}`,
     `ID: ${job.productId}`,
     "",
+    "BOOK DNA",
+    `Loại sách: ${job.bookDNA.bookType || "Chưa rõ"}`,
+    `Sức hút chính: ${job.bookDNA.coreAppeal || "Chưa rõ"}`,
+    `Angle marketing: ${job.bookDNA.marketingAngle || "Chưa rõ"}`,
+    "Độc giả mục tiêu:",
+    formatList(job.bookDNA.targetReaders),
+    "Lý do mua:",
+    formatList(job.bookDNA.buyingReasons),
+    `Confidence: ${job.bookDNA.confidence}/100`,
+    "",
+    ...(job.bookDNA.confidence < 40
+      ? [
+          "Cảnh báo: dữ liệu sản phẩm hiện quá ít để viết mô tả marketing tốt. Nên bổ sung mô tả gốc, back cover, thông tin tác giả hoặc nội dung sách trước khi cập nhật.",
+          ""
+        ]
+      : []),
     `SEO hiện tại: ${job.audit.currentSeoScore}/100`,
     `Marketing hiện tại: ${job.audit.currentMarketingScore}/100`,
     "",
@@ -126,7 +142,7 @@ function buildPreviewMessage(job: ProductSeoPendingJob): string {
     job.metaDescription,
     "",
     "Preview mô tả:",
-    job.finalBodyHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+    stripHtml(job.finalBodyHtml),
     "",
     `SEO sau tối ưu dự kiến: ${job.audit.improvedSeoScore}/100`,
     `Marketing sau tối ưu dự kiến: ${job.audit.improvedMarketingScore}/100`
@@ -136,18 +152,8 @@ function buildPreviewMessage(job: ProductSeoPendingJob): string {
     preview.push("", "Cảnh báo:", formatList(job.audit.warnings));
   }
 
-  if (job.audit.researchSources.length > 0) {
-    preview.push(
-      "",
-      "Nguồn tham khảo đã dùng:",
-      job.audit.researchSources
-        .slice(0, 3)
-        .map((source) => `- ${source.title}${source.url ? ` (${source.url})` : ""}`)
-        .join("\n")
-    );
-  }
-
-  return truncatePreview(preview.join("\n")).text;
+  preview.push("", "Bạn muốn cập nhật phần nào?");
+  return truncatePreview(preview.join("\n"));
 }
 
 function buildActionButtons(jobId: string): InlineKeyboardButton[][] {
@@ -161,7 +167,7 @@ function buildActionButtons(jobId: string): InlineKeyboardButton[][] {
 
 async function analyzeProductByAlias(ctx: Context, userId: number, alias: string): Promise<void> {
   logger.info("product_alias_extracted", { userId, alias });
-  await replySafely(ctx, "Đang phân tích sản phẩm và tạo đề xuất SEO...", { userId, alias });
+  await replySafely(ctx, "Đang tìm sản phẩm và phân tích Book DNA...", { userId, alias });
 
   const product = await sapoProductService.findProductByAlias(alias);
   if (!product || !product.id || !product.title) {
@@ -169,9 +175,22 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
     await replySafely(ctx, "Không tìm thấy sản phẩm tương ứng trong Sapo.", { userId, alias });
     return;
   }
-  logger.info("sapo_product_found", { userId, productId: product.id, alias });
+  logger.info("sapo_product_found", { userId, productId: product.id, alias, title: product.title });
 
-  const audit = auditProductSeoMarketing(product);
+  logger.info("book_dna_started", { userId, productId: product.id, alias });
+  const bookDNA = await analyzeBookDNA({
+    product,
+    relatedData: {
+      currentContentText: stripHtml(product.content || ""),
+      summaryText: stripHtml(product.summary || ""),
+      tags: product.tags,
+      categories: [],
+      sameAuthorProducts: []
+    }
+  });
+  logger.info("book_dna_completed", { userId, productId: product.id, alias, confidence: bookDNA.confidence });
+
+  const audit = auditProductSeoMarketing(product, bookDNA);
   logger.info("product_audit_completed", {
     userId,
     productId: product.id,
@@ -180,15 +199,7 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
     marketingScore: audit.currentMarketingScore
   });
 
-  const researchSources = await productResearchService.researchProduct(product);
-  logger.info("product_external_research_completed", {
-    userId,
-    productId: product.id,
-    alias,
-    sourceCount: researchSources.length
-  });
-
-  const aiResult = await generateProductSeoMarketing({ product, audit, researchSources });
+  const aiResult = await generateProductSeoMarketing({ product, audit, bookDNA });
   logger.info("ai_product_seo_generated", {
     userId,
     productId: product.id,
@@ -207,6 +218,7 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
     seoTitle: aiResult.seoTitle,
     metaDescription: aiResult.metaDescription,
     finalBodyHtml: aiResult.finalBodyHtml,
+    bookDNA,
     audit: {
       currentSeoScore: audit.currentSeoScore,
       currentMarketingScore: audit.currentMarketingScore,
@@ -214,8 +226,7 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
       improvedMarketingScore: aiResult.improvedMarketingScore,
       issues: audit.issues,
       opportunities: audit.opportunities,
-      warnings: aiResult.warnings,
-      researchSources
+      warnings: aiResult.warnings
     },
     createdAt: Date.now()
   };
@@ -248,9 +259,99 @@ export async function handleSeoCommand(ctx: Context): Promise<void> {
   try {
     await analyzeProductByAlias(ctx, userId, alias);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "Lỗi hệ thống";
+    const reason = formatFriendlyError(error);
     logger.error("product_seo_update_failed", { userId, alias, reason });
     await replySafely(ctx, `Không tối ưu được sản phẩm: ${reason}`, { userId, alias });
+  }
+}
+
+export async function handleInspectProductCommand(ctx: Context): Promise<void> {
+  const userId = getUserId(ctx);
+  const alias = extractNhanamProductAlias(getMessageText(ctx));
+
+  if (!userId) {
+    await replySafely(ctx, "Không xác định được user Telegram.");
+    return;
+  }
+
+  if (!alias) {
+    await replySafely(ctx, "URL không hợp lệ. Vui lòng dùng: /inspectproduct https://nhanam.vn/<alias>", { userId });
+    return;
+  }
+
+  try {
+    const inspect = await sapoProductService.inspectProductByAlias(alias);
+    if (!inspect) {
+      await replySafely(ctx, "Không tìm thấy sản phẩm tương ứng trong Sapo.", { userId, alias });
+      return;
+    }
+
+    await replySafely(
+      ctx,
+      [
+        "Product inspect",
+        "",
+        `ID: ${inspect.product.id}`,
+        `Title: ${inspect.product.title}`,
+        `Alias: ${inspect.product.alias ?? inspect.product.handle ?? ""}`,
+        `content length: ${inspect.contentLength}`,
+        `summary length: ${inspect.summaryLength}`,
+        `updated_at: ${inspect.product.updatedAt ?? ""}`,
+        "",
+        "Possible SEO fields:",
+        ...inspect.possibleSeoFields.map((item) => `- ${item.field}: ${item.exists ? "exists" : "not found"}`)
+      ].join("\n"),
+      { userId, productId: inspect.product.id, alias }
+    );
+  } catch (error) {
+    const reason = formatFriendlyError(error);
+    logger.error("product_seo_update_failed", { userId, alias, reason });
+    await replySafely(ctx, `Không inspect được sản phẩm: ${reason}`, { userId, alias });
+  }
+}
+
+export async function handleTestUpdateCommand(ctx: Context): Promise<void> {
+  const userId = getUserId(ctx);
+  const alias = extractNhanamProductAlias(getMessageText(ctx));
+
+  if (!userId) {
+    await replySafely(ctx, "Không xác định được user Telegram.");
+    return;
+  }
+
+  if (!alias) {
+    await replySafely(ctx, "URL không hợp lệ. Vui lòng dùng: /testupdate https://nhanam.vn/<alias>", { userId });
+    return;
+  }
+
+  try {
+    const product = await sapoProductService.findProductByAlias(alias);
+    if (!product || !product.id) {
+      await replySafely(ctx, "Không tìm thấy sản phẩm tương ứng trong Sapo.", { userId, alias });
+      return;
+    }
+
+    const result = await sapoProductService.testUpdateProductContent(product.id);
+    await replySafely(
+      ctx,
+      [
+        "Test update product.content",
+        "",
+        "PUT OK",
+        "GET verify OK",
+        "product.content changed",
+        "",
+        `ID: ${product.id}`,
+        `Title: ${product.title}`,
+        `Alias: ${product.alias ?? product.handle ?? alias}`,
+        `Marker: ${result.marker}`
+      ].join("\n"),
+      { userId, productId: product.id, alias }
+    );
+  } catch (error) {
+    const reason = formatFriendlyError(error);
+    logger.error("product_seo_update_failed", { userId, alias, reason });
+    await replySafely(ctx, `Test update thất bại: ${reason}`, { userId, alias });
   }
 }
 
@@ -304,7 +405,7 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
     try {
       await analyzeProductByAlias(ctx, userId, detectedJob.alias);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : "Lỗi hệ thống";
+      const reason = formatFriendlyError(error);
       logger.error("product_seo_update_failed", { userId, jobId, alias: detectedJob.alias, reason });
       await replySafely(ctx, `Không tối ưu được sản phẩm: ${reason}`, { userId, jobId });
     }
@@ -333,7 +434,11 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
     }
 
     if (action === "seo_desc") {
-      await sapoProductService.updateProductDescription(job.productId, job.finalBodyHtml);
+      await sapoProductService.updateProductContent(job.productId, job.finalBodyHtml, `<!-- seo-bot-update:${job.jobId} -->`, {
+        userId,
+        jobId,
+        alias: job.productAlias
+      });
       deleteProductSeoPendingJob(jobId);
       logger.info("product_seo_update_description_success", {
         userId,
@@ -341,57 +446,64 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
         productId: job.productId,
         alias: job.productAlias
       });
-      await replySafely(ctx, `Đã cập nhật mô tả sản phẩm:\n${job.productTitle}\n${buildProductUrl(job.productAlias)}`, {
-        userId,
-        jobId
-      });
+      await replySafely(
+        ctx,
+        `Đã cập nhật và xác nhận product.content đã thay đổi:\n\n${job.productTitle}\n${buildProductUrl(job.productAlias)}`,
+        { userId, jobId, productId: job.productId, alias: job.productAlias }
+      );
       return;
     }
 
     if (action === "seo_meta") {
-      const result = await sapoProductService.updateProductSeoFields(job.productId, {
-        seoTitle: job.seoTitle,
-        metaDescription: job.metaDescription
-      });
-      if (result.updated) {
-        deleteProductSeoPendingJob(jobId);
-        logger.info("product_seo_update_meta_success", { userId, jobId, productId: job.productId, alias: job.productAlias });
-        await replySafely(ctx, `Đã cập nhật SEO sản phẩm:\n${job.productTitle}\n${buildProductUrl(job.productAlias)}`, {
-          userId,
-          jobId
-        });
-        return;
-      }
-
-      await replySafely(ctx, result.reason ?? "Chưa xác định chắc field SEO trong Sapo API. Hiện chưa cập nhật SEO fields.", {
-        userId,
-        jobId
-      });
+      await replySafely(ctx, SEO_FIELDS_DISABLED_MESSAGE, { userId, jobId, productId: job.productId, alias: job.productAlias });
       return;
     }
 
     if (action === "seo_all") {
-      const result = await sapoProductService.updateProductDescriptionAndSeo(job.productId, {
-        html: job.finalBodyHtml,
-        seoTitle: job.seoTitle,
-        metaDescription: job.metaDescription
+      await sapoProductService.updateProductContent(job.productId, job.finalBodyHtml, `<!-- seo-bot-update:${job.jobId} -->`, {
+        userId,
+        jobId,
+        alias: job.productAlias
       });
       deleteProductSeoPendingJob(jobId);
-      logger.info("product_seo_update_all_success", {
+      logger.info("product_seo_update_description_success", {
         userId,
         jobId,
         productId: job.productId,
-        alias: job.productAlias,
-        seoUpdated: result.seoUpdated
+        alias: job.productAlias
       });
-      const message = result.seoUpdated
-        ? `Đã cập nhật mô tả và SEO sản phẩm:\n${job.productTitle}\n${buildProductUrl(job.productAlias)}`
-        : `Đã cập nhật mô tả. SEO fields chưa được cập nhật vì chưa xác định chắc field trong Sapo API.\n${job.productTitle}\n${buildProductUrl(job.productAlias)}`;
-      await replySafely(ctx, message, { userId, jobId });
+      await replySafely(
+        ctx,
+        `Đã cập nhật mô tả sản phẩm. SEO fields chưa được cập nhật vì chưa xác định chắc field SEO trong Sapo Product API.\n\n${job.productTitle}\n${buildProductUrl(job.productAlias)}`,
+        { userId, jobId, productId: job.productId, alias: job.productAlias }
+      );
     }
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "Update Sapo thất bại";
-    logger.error("product_seo_update_failed", { userId, jobId, productId: job.productId, alias: job.productAlias, reason });
-    await replySafely(ctx, `Update Sapo thất bại: ${reason}`, { userId, jobId });
+    const reason = formatFriendlyError(error);
+    logger.error("product_seo_update_failed", {
+      userId,
+      jobId,
+      productId: job.productId,
+      alias: job.productAlias,
+      reason
+    });
+    await replySafely(ctx, `Update Sapo thất bại: ${reason}`, {
+      userId,
+      jobId,
+      productId: job.productId,
+      alias: job.productAlias
+    });
   }
+}
+
+function formatFriendlyError(error: unknown): string {
+  if (error instanceof AppError && error.code === "SAPO_PRODUCT_CONTENT_VERIFY_FAILED") {
+    return "Sapo trả OK nhưng product.content chưa đổi. Chưa xác nhận cập nhật thành công.";
+  }
+
+  if (error instanceof AppError) {
+    return error.message;
+  }
+
+  return error instanceof Error ? error.message : "Lỗi hệ thống";
 }

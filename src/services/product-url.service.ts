@@ -7,7 +7,7 @@ function findFirstUrl(text: string): URL | null {
 
   for (const match of matches) {
     try {
-      const url = new URL(match);
+      const url = new URL(match.replace(/[),.;!?]+$/, ""));
       if (NHANAM_HOSTS.has(url.hostname.toLowerCase())) {
         return url;
       }

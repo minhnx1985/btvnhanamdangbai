@@ -3,8 +3,8 @@ export type NormalizedSapoProduct = {
   title: string;
   alias?: string;
   handle?: string;
-  bodyHtml?: string;
-  description?: string;
+  content?: string;
+  summary?: string;
   vendor?: string;
   productType?: string;
   tags?: string[];
@@ -17,6 +17,27 @@ export type NormalizedSapoProduct = {
   createdAt?: string;
   updatedAt?: string;
   raw?: unknown;
+};
+
+export type BookDNA = {
+  bookType: string;
+  genreOrCategory: string;
+  corePremise: string;
+  coreAppeal: string;
+  emotionalPromise: string;
+  intellectualPromise: string;
+  targetReaders: string[];
+  buyingReasons: string[];
+  sellingPoints: string[];
+  authorLeverage: string;
+  seriesOrBrandLeverage: string;
+  comparableTitlesOrSignals: string[];
+  toneOfVoice: string;
+  marketingAngle: string;
+  seoKeywords: string[];
+  forbiddenClaims: string[];
+  missingData: string[];
+  confidence: number;
 };
 
 export type ProductSeoMarketingAudit = {
@@ -36,7 +57,7 @@ export type ProductResearchSource = {
 export type ProductSeoMarketingInput = {
   product: NormalizedSapoProduct;
   audit: ProductSeoMarketingAudit;
-  researchSources: ProductResearchSource[];
+  bookDNA: BookDNA;
 };
 
 export type ProductSeoMarketingResult = {
@@ -61,6 +82,7 @@ export type ProductSeoPendingJob = {
   seoTitle: string;
   metaDescription: string;
   finalBodyHtml: string;
+  bookDNA: BookDNA;
   audit: {
     currentSeoScore: number;
     currentMarketingScore: number;
@@ -69,7 +91,6 @@ export type ProductSeoPendingJob = {
     issues: string[];
     opportunities: string[];
     warnings: string[];
-    researchSources: ProductResearchSource[];
   };
   createdAt: number;
 };
