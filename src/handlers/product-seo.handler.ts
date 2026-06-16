@@ -36,11 +36,21 @@ type InlineKeyboardButton = {
   callback_data: string;
 };
 
+type BufferedEnrichmentInput = {
+  ctx: TextContext;
+  jobId: string;
+  parts: string[];
+  timer: ReturnType<typeof setTimeout>;
+};
+
 const MAX_PREVIEW_LENGTH = 3400;
+const ENRICHMENT_INPUT_DEBOUNCE_MS = 4000;
 const SEO_FIELDS_DISABLED_MESSAGE =
   "Hiện chưa xác định chắc field SEO trong Sapo Product API. Bot chưa cập nhật SEO fields.";
 const PRODUCT_EDIT_FORBIDDEN_MESSAGE =
   "Bạn không có quyền sửa sản phẩm Sapo. Chỉ Telegram ID 1623038607 được phép cập nhật sản phẩm; phần blog vẫn dùng bình thường.";
+
+const enrichmentInputBuffers = new Map<number, BufferedEnrichmentInput>();
 
 function getUserId(ctx: Context): number | undefined {
   return ctx.from?.id;
@@ -534,24 +544,71 @@ export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<
     return false;
   }
 
-  try {
-    await replySafely(ctx, "Đang đọc dữ liệu bổ sung và cập nhật lại Book DNA...", {
-      userId,
-      jobId: job.jobId,
-      productId: job.productId,
-      alias: job.productAlias
-    });
+  bufferProductSeoEnrichmentInput(ctx, userId, job, text);
+  return true;
+}
 
+function bufferProductSeoEnrichmentInput(
+  ctx: TextContext,
+  userId: number,
+  job: ProductSeoBookUnderstandingJob,
+  text: string
+): void {
+  const existing = enrichmentInputBuffers.get(userId);
+  if (existing) {
+    clearTimeout(existing.timer);
+  }
+
+  const parts = existing && existing.jobId === job.jobId ? [...existing.parts, text] : [text];
+  const timer = setTimeout(() => {
+    void processBufferedProductSeoEnrichment(userId);
+  }, ENRICHMENT_INPUT_DEBOUNCE_MS);
+
+  enrichmentInputBuffers.set(userId, {
+    ctx,
+    jobId: job.jobId,
+    parts,
+    timer
+  });
+
+  logger.info("product_seo_enrichment_input_buffered", {
+    userId,
+    jobId: job.jobId,
+    productId: job.productId,
+    alias: job.productAlias,
+    parts: parts.length
+  });
+}
+
+async function processBufferedProductSeoEnrichment(userId: number): Promise<void> {
+  const buffered = enrichmentInputBuffers.get(userId);
+  if (!buffered) {
+    return;
+  }
+
+  enrichmentInputBuffers.delete(userId);
+  const job = getProductSeoEnrichmentWait(userId);
+  if (!job || job.jobId !== buffered.jobId) {
+    return;
+  }
+
+  const combinedText = buffered.parts.join("\n\n").trim();
+  if (!combinedText) {
+    return;
+  }
+
+  try {
     logger.info("book_dna_started", {
       userId,
       jobId: job.jobId,
       productId: job.productId,
-      alias: job.productAlias
+      alias: job.productAlias,
+      enrichmentParts: buffered.parts.length
     });
     const enrichment = await enrichBookDNA({
       product: job.product,
       currentBookDNA: job.bookDNA,
-      enrichmentText: text
+      enrichmentText: combinedText
     });
 
     const updatedJob: ProductSeoBookUnderstandingJob = {
@@ -588,13 +645,12 @@ export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<
       marketingScore: updatedJob.audit.currentMarketingScore
     });
 
-    await replyWithButtonsSafely(ctx, buildBookDnaMessage(updatedJob), buildEnrichedBookDnaButtons(updatedJob.jobId), {
+    await replyWithButtonsSafely(buffered.ctx, buildBookDnaMessage(updatedJob), buildEnrichedBookDnaButtons(updatedJob.jobId), {
       userId,
       jobId: updatedJob.jobId,
       productId: updatedJob.productId,
       alias: updatedJob.productAlias
     });
-    return true;
   } catch (error) {
     clearProductSeoEnrichmentWait(userId);
     const reason = formatFriendlyError(error);
@@ -605,13 +661,12 @@ export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<
       alias: job.productAlias,
       reason
     });
-    await replySafely(ctx, `Không cập nhật được Book DNA từ dữ liệu bổ sung: ${reason}`, {
+    await replySafely(buffered.ctx, `Không cập nhật được Book DNA từ dữ liệu bổ sung: ${reason}`, {
       userId,
       jobId: job.jobId,
       productId: job.productId,
       alias: job.productAlias
     });
-    return true;
   }
 }
 

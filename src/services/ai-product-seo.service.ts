@@ -34,7 +34,8 @@ const FORBIDDEN_NORMALIZED_PHRASES = [
   "sieu pham",
   "gay bao",
   "khong the bo lo",
-  "noi ma"
+  "noi ma",
+  "vi sao nen doc / diem noi bat / cuon sach nay danh cho ai"
 ];
 
 type RawAiProductSeoResult = {
@@ -140,7 +141,7 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
         "",
         "Cấu trúc HTML:",
         "- h2 Giới thiệu sách",
-        "- h2 Vì sao nên đọc / Điểm nổi bật / Cuốn sách này dành cho ai",
+        "- h2 Chọn đúng một tiêu đề phù hợp: \"Vì sao nên đọc\" hoặc \"Điểm nổi bật\" hoặc \"Cuốn sách này dành cho ai\". Không ghép cả ba bằng dấu /.",
         "- h2 Thông tin xuất bản nếu có dữ liệu",
         "- CTA mềm nếu phù hợp",
         "",
