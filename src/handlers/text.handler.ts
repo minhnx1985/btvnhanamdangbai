@@ -96,15 +96,36 @@ export async function submitDraftPost(
   const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
 
   try {
-    const contentHtml = input.useAiFormat
-      ? await shopApiService.formatContentHtml({
-        title: input.title,
-        content: input.content
-      })
-      : plainTextToHtml(input.content, {
+    let aiFormatNote: string | undefined;
+    let contentHtml: string;
+
+    if (input.useAiFormat) {
+      try {
+        contentHtml = await shopApiService.formatContentHtml({
+          title: input.title,
+          content: input.content
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "AI format không đạt kiểm tra";
+        logger.warn("AI formatting skipped, falling back to plain HTML", {
+          userId,
+          postType: input.postType,
+          reason
+        });
+        aiFormatNote = "AI format không đạt kiểm tra giữ nguyên nội dung, đã dùng format thường.";
+        await replySafely(ctx, `⚠️ ${aiFormatNote}`, { userId, postType: input.postType });
+        contentHtml = plainTextToHtml(input.content, {
+          embedDirectImageLinks: !isAuthorPost,
+          linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
+        });
+      }
+    } else {
+      contentHtml = plainTextToHtml(input.content, {
         embedDirectImageLinks: !isAuthorPost,
         linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
       });
+    }
+
     const tags = await generateAutomaticTags(input);
 
     const result = await sapoService.createDraftArticle({
@@ -137,6 +158,10 @@ export async function submitDraftPost(
 
     if (tags) {
       lines.push(`- Tag: ${tags}`);
+    }
+
+    if (aiFormatNote) {
+      lines.push(`- Ghi chú: ${aiFormatNote}`);
     }
 
     await replySafely(ctx, lines.join("\n"), { userId, postType: input.postType, articleId: result.id });
