@@ -208,10 +208,6 @@ function ensureBookUnderstandingReady(input: ProductSeoMarketingInput): void {
     throw new AppError(`Book Understanding chưa đủ để viết: ${missingFields.join(", ")}`, "BOOK_UNDERSTANDING_INCOMPLETE");
   }
 
-  if (input.bookDNA.confidence < 40) {
-    throw new AppError("Book DNA confidence thấp; cần bổ sung dữ liệu trước khi viết để tránh mô tả lan man.", "BOOK_DNA_LOW_CONFIDENCE");
-  }
-
   const normalizedPositioning = normalizeForQualityCheck(input.bookDNA.positioningStatement);
   if (
     input.bookDNA.positioningStatement.length < 45 ||
