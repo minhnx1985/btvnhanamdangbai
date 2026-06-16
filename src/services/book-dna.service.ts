@@ -1,3 +1,4 @@
+import axios from "axios";
 import { BookDNA, NormalizedSapoProduct } from "../types/product-seo.types";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
@@ -20,6 +21,19 @@ type BookDNAInput = {
 
 type RawBookDNA = Partial<Record<keyof BookDNA, unknown>>;
 
+type HumanEnrichmentInput = {
+  product: NormalizedSapoProduct;
+  currentBookDNA: BookDNA;
+  enrichmentText: string;
+};
+
+type RawHumanBookEnrichment = {
+  dataType?: unknown;
+  summary?: unknown;
+  insights?: unknown;
+  updatedBookDNA?: RawBookDNA;
+};
+
 export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
   logger.info("book_dna_started", {
     productId: input.product.id,
@@ -30,6 +44,27 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
     {
       role: "system",
       content: [
+        "Mandatory flow before writing:",
+        "Product Data -> Book Understanding -> Positioning -> Framework Selection -> Writing.",
+        "This step must complete Book Understanding, Positioning, and Framework Selection only. Do not write product description in this step.",
+        "",
+        "Required understanding fields:",
+        "- Reader DNA: who actually reads or experiences the book.",
+        "- Buyer DNA: who pays or decides to buy.",
+        "- Reading Experience: what reading, playing, interacting, or thinking with the book feels like in practice.",
+        "- Core Promise: the largest reader/buyer value.",
+        "- Competitive Advantage: why choose this book instead of another.",
+        "- Positioning Statement: one exact sentence describing what this book is.",
+        "- Selected Framework: the most suitable marketing structure, chosen naturally, not forced.",
+        "",
+        "Rules:",
+        "- Do not start from metadata. Metadata can support understanding, but it is not the angle.",
+        "- Do not use page count, book size, paperback binding, or technical specs as selling points.",
+        "- Technical specs belong only to final publication information, never to core positioning.",
+        "- If you cannot create a precise Positioning Statement, reduce confidence and list missingData.",
+        "- For children's books, prioritize parent-child value and distinguish Reader (child) from Buyer (parent/adult).",
+        "- For interactive children's books, analyze reading together, playing, sound, facial expression, movement, curiosity, and participation.",
+        "",
         "Bạn là chuyên gia marketing sách và biên tập nội dung cho Nhã Nam.",
         "",
         "Nhiệm vụ:",
@@ -69,6 +104,13 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
         JSON.stringify({
           bookType: "",
           genreOrCategory: "",
+          readerDNA: "",
+          buyerDNA: "",
+          readingExperience: "",
+          corePromise: "",
+          competitiveAdvantage: "",
+          positioningStatement: "",
+          selectedFramework: "",
           corePremise: "",
           coreAppeal: "",
           emotionalPromise: "",
@@ -121,6 +163,201 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
   return bookDNA;
 }
 
+export async function enrichBookDNA(input: HumanEnrichmentInput): Promise<{
+  dataType: string;
+  summary: string;
+  insights: string[];
+  updatedBookDNA: BookDNA;
+}> {
+  const enrichmentSource = await prepareHumanEnrichmentSource(input.enrichmentText);
+
+  const result = await generateHumanEnrichmentJson([
+    {
+      role: "system",
+      content: [
+        "You are a senior Vietnamese publishing marketer and copy strategist working for Nha Nam.",
+        "",
+        "Task:",
+        "A human user is teaching the bot more about a book before product-page writing.",
+        "Read the new data, detect the data type, summarize it, extract useful marketing/editorial insights, then update Book DNA.",
+        "",
+        "Mandatory flow:",
+        "Book DNA -> Human Enrichment -> Final Book Understanding -> Writing.",
+        "This step is Human Enrichment and Final Book Understanding only. Do not write product description.",
+        "",
+        "Possible data types:",
+        "- plain note",
+        "- website link",
+        "- Nha Nam link",
+        "- Wikipedia link",
+        "- press/article link",
+        "- back cover",
+        "- review",
+        "- editor note",
+        "- mixed source",
+        "",
+        "Rules:",
+        "- Do not fabricate awards, reviews, bestseller status, sales numbers, endorsements, media coverage, plot details, or age claims.",
+        "- Update only what is supported by product data, existing Book DNA, or the new human data.",
+        "- Separate Reader DNA from Buyer DNA.",
+        "- For children's books, prioritize parent-child value, reading together, play, interaction, curiosity, expression, and participation.",
+        "- Do not use page count, book size, paperback binding, or other technical specs as selling points.",
+        "- If the new data is weak or only a URL with little readable content, keep confidence modest and list missingData.",
+        "- If Positioning Statement cannot be precise, lower confidence and explain missingData.",
+        "",
+        "Output JSON only:",
+        JSON.stringify({
+          dataType: "",
+          summary: "",
+          insights: [],
+          updatedBookDNA: {
+            bookType: "",
+            genreOrCategory: "",
+            readerDNA: "",
+            buyerDNA: "",
+            readingExperience: "",
+            corePromise: "",
+            competitiveAdvantage: "",
+            positioningStatement: "",
+            selectedFramework: "",
+            corePremise: "",
+            coreAppeal: "",
+            emotionalPromise: "",
+            intellectualPromise: "",
+            targetReaders: [],
+            buyingReasons: [],
+            sellingPoints: [],
+            authorLeverage: "",
+            seriesOrBrandLeverage: "",
+            comparableTitlesOrSignals: [],
+            toneOfVoice: "",
+            marketingAngle: "",
+            seoKeywords: [],
+            forbiddenClaims: [],
+            missingData: [],
+            confidence: 0
+          }
+        }),
+        "",
+        "No markdown, no explanation outside JSON."
+      ].join("\n")
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        product: {
+          id: input.product.id,
+          title: input.product.title,
+          alias: input.product.alias,
+          handle: input.product.handle,
+          content: input.product.content,
+          summary: input.product.summary,
+          vendor: input.product.vendor,
+          productType: input.product.productType,
+          tags: input.product.tags,
+          variants: input.product.variants
+        },
+        currentBookDNA: input.currentBookDNA,
+        humanEnrichment: enrichmentSource
+      })
+    }
+  ]);
+
+  if (!result.updatedBookDNA) {
+    throw new AppError("Human Enrichment thieu updatedBookDNA", "BOOK_DNA_INVALID_RESPONSE");
+  }
+
+  return {
+    dataType: readString(result.dataType, "dataType"),
+    summary: readString(result.summary, "summary"),
+    insights: readStringArray(result.insights, "insights"),
+    updatedBookDNA: normalizeBookDNA(result.updatedBookDNA)
+  };
+}
+
+function normalizeForQualityCheck(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .replace(/\u0111/g, "d")
+    .replace(/\u0110/g, "D")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function prepareHumanEnrichmentSource(rawText: string): Promise<{
+  originalText: string;
+  detectedUrls: string[];
+  fetchedText?: string;
+}> {
+  const text = rawText.trim();
+  const detectedUrls = Array.from(text.matchAll(/https?:\/\/[^\s]+/gi)).map((match) => match[0]);
+  const firstUrl = detectedUrls[0];
+
+  if (!firstUrl) {
+    return { originalText: text, detectedUrls };
+  }
+
+  const fetchedText = await fetchReadableUrlText(firstUrl);
+  return {
+    originalText: text,
+    detectedUrls,
+    fetchedText
+  };
+}
+
+async function fetchReadableUrlText(url: string): Promise<string | undefined> {
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return undefined;
+    }
+
+    const response = await axios.get<string>(parsed.toString(), {
+      responseType: "text",
+      timeout: 10000,
+      maxContentLength: 800000,
+      headers: {
+        "User-Agent": "NhaNamSeoBot/1.0"
+      }
+    });
+
+    return stripHtmlToReadableText(String(response.data)).slice(0, 12000);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Unknown URL fetch error";
+    logger.warn("book_dna_enrichment_url_fetch_failed", { url, reason });
+    return undefined;
+  }
+}
+
+function stripHtmlToReadableText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function generateHumanEnrichmentJson(messages: ShopApiChatMessage[]): Promise<RawHumanBookEnrichment> {
+  try {
+    return await shopApiService.generateJson<RawHumanBookEnrichment>(messages);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "AI_JSON_PARSE_FAILED") {
+      throw new AppError("Human Enrichment JSON parse fail", "BOOK_DNA_ENRICHMENT_JSON_PARSE_FAILED");
+    }
+
+    throw error;
+  }
+}
+
 async function generateBookDNAJson(messages: ShopApiChatMessage[]): Promise<RawBookDNA> {
   try {
     return await shopApiService.generateJson<RawBookDNA>(messages);
@@ -134,9 +371,18 @@ async function generateBookDNAJson(messages: ShopApiChatMessage[]): Promise<RawB
 }
 
 function normalizeBookDNA(result: RawBookDNA): BookDNA {
+  const positioningStatement = readPositioningStatement(result.positioningStatement);
+
   return {
     bookType: readString(result.bookType, "bookType"),
     genreOrCategory: readString(result.genreOrCategory, "genreOrCategory"),
+    readerDNA: readString(result.readerDNA, "readerDNA"),
+    buyerDNA: readString(result.buyerDNA, "buyerDNA"),
+    readingExperience: readString(result.readingExperience, "readingExperience"),
+    corePromise: readString(result.corePromise, "corePromise"),
+    competitiveAdvantage: readString(result.competitiveAdvantage, "competitiveAdvantage"),
+    positioningStatement,
+    selectedFramework: readString(result.selectedFramework, "selectedFramework"),
     corePremise: readString(result.corePremise, "corePremise"),
     coreAppeal: readString(result.coreAppeal, "coreAppeal"),
     emotionalPromise: readString(result.emotionalPromise, "emotionalPromise"),
@@ -162,6 +408,11 @@ function readString(value: unknown, fieldName: string): string {
   }
 
   return value.trim();
+}
+
+function readPositioningStatement(value: unknown): string {
+  const statement = readString(value, "positioningStatement");
+  return statement;
 }
 
 function readStringArray(value: unknown, fieldName: string): string[] {

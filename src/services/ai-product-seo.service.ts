@@ -20,6 +20,23 @@ const FORBIDDEN_FILLER_PATTERNS = [
   /khổ sách dễ mang theo/i
 ];
 
+const FORBIDDEN_NORMALIZED_PHRASES = [
+  "du lieu hien co cho thay",
+  "bia mem de cam doc",
+  "thuan tien bo sung vao tu sach",
+  "phu hop lam qua tang",
+  "428 trang phu hop de doc lau hon",
+  "so trang phu hop de doc lau hon",
+  "kho sach de mang theo",
+  "khong chi",
+  "mang den cho doc gia",
+  "hanh trinh day cam xuc",
+  "sieu pham",
+  "gay bao",
+  "khong the bo lo",
+  "noi ma"
+];
+
 type RawAiProductSeoResult = {
   seoTitle?: unknown;
   metaDescription?: unknown;
@@ -33,6 +50,8 @@ type RawAiProductSeoResult = {
 };
 
 export async function generateProductSeoMarketing(input: ProductSeoMarketingInput): Promise<ProductSeoMarketingResult> {
+  ensureBookUnderstandingReady(input);
+
   const result = await generateWriterJson([
     {
       role: "system",
@@ -45,6 +64,9 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
         "- Avoid hype, clickbait, empty praise, exaggerated emotion, generic AI phrasing, and unsupported claims.",
         "",
         "Core principle before writing:",
+        "- Follow this exact flow: Product Data -> Book Understanding -> Positioning -> Framework Selection -> Writing.",
+        "- Do not write from metadata. Metadata can appear only as support or final publication information.",
+        "- Do not write unless Book DNA has Reader DNA, Buyer DNA, Reading Experience, Core Promise, Competitive Advantage, Positioning Statement, and Selected Framework.",
         "- First determine the objective: awareness, traffic, engagement, conversion, preorder, or brand building.",
         "- Then determine the audience from Book DNA: literary readers, general readers, parents, teachers, children, nonfiction readers, economics/politics readers, existing fans, or cold audience.",
         "- Then determine the platform. For this task, the platform is the Nha Nam product page / landing page.",
@@ -66,8 +88,11 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
         "- Genre fiction: emphasize plot, mystery, stakes, and worldbuilding when supported.",
         "- Nonfiction: emphasize insight, usefulness, authority, and relevance.",
         "- Children's books: emphasize emotion, reading experience, and parent-child value.",
+        "- For children's books, separate Reader DNA (child) from Buyer DNA (parent/adult), and write from reading together, playing, interaction, curiosity, expression, and participation.",
         "- Politics, economics, history: emphasize expertise, context, timeliness, and evidence.",
         "- Combo products: emphasize the real buying logic: complete set, same author/series/theme, or convenience, only when supported.",
+        "- Technical specs such as page count, size, binding, format, price, ISBN, and publisher only belong in final publication information.",
+        "- Never use page count, book size, or paperback binding as a selling point.",
         "",
         "Additional hard rules:",
         "- Never fabricate awards, reviews, bestseller status, sales numbers, endorsements, or media coverage.",
@@ -167,6 +192,37 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
   return normalizeAiResult(result, input.bookDNA.confidence);
 }
 
+function ensureBookUnderstandingReady(input: ProductSeoMarketingInput): void {
+  const requiredFields = [
+    ["readerDNA", input.bookDNA.readerDNA],
+    ["buyerDNA", input.bookDNA.buyerDNA],
+    ["readingExperience", input.bookDNA.readingExperience],
+    ["corePromise", input.bookDNA.corePromise],
+    ["competitiveAdvantage", input.bookDNA.competitiveAdvantage],
+    ["positioningStatement", input.bookDNA.positioningStatement],
+    ["selectedFramework", input.bookDNA.selectedFramework]
+  ];
+  const missingFields = requiredFields.filter(([, value]) => typeof value !== "string" || !value.trim()).map(([field]) => field);
+
+  if (missingFields.length > 0) {
+    throw new AppError(`Book Understanding chưa đủ để viết: ${missingFields.join(", ")}`, "BOOK_UNDERSTANDING_INCOMPLETE");
+  }
+
+  if (input.bookDNA.confidence < 40) {
+    throw new AppError("Book DNA confidence thấp; cần bổ sung dữ liệu trước khi viết để tránh mô tả lan man.", "BOOK_DNA_LOW_CONFIDENCE");
+  }
+
+  const normalizedPositioning = normalizeForQualityCheck(input.bookDNA.positioningStatement);
+  if (
+    input.bookDNA.positioningStatement.length < 45 ||
+    normalizedPositioning.includes("du lieu hien co cho thay") ||
+    normalizedPositioning.includes("day la mot cuon sach") ||
+    normalizedPositioning.includes("san pham nay")
+  ) {
+    throw new AppError("Positioning Statement yếu hoặc confidence thấp; cần bổ sung dữ liệu thay vì viết lan man.", "BOOK_DNA_WEAK_POSITIONING");
+  }
+}
+
 async function generateWriterJson(messages: ShopApiChatMessage[]): Promise<RawAiProductSeoResult> {
   try {
     return await shopApiService.generateJson<RawAiProductSeoResult>(messages);
@@ -263,5 +319,21 @@ function validateHtml(html: string, fieldName: string): string {
     throw new AppError(`HTML sau sanitize còn chứa filler bị cấm: ${fieldName}`, "AI_PRODUCT_SEO_FORBIDDEN_FILLER");
   }
 
+  const normalizedText = normalizeForQualityCheck(plainText);
+  if (FORBIDDEN_NORMALIZED_PHRASES.some((phrase) => normalizedText.includes(phrase))) {
+    throw new AppError(`HTML sau sanitize con chua cum SEO/filler bi cam: ${fieldName}`, "AI_PRODUCT_SEO_FORBIDDEN_FILLER");
+  }
+
   return html;
+}
+
+function normalizeForQualityCheck(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0111/g, "d")
+    .replace(/\u0110/g, "D")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }

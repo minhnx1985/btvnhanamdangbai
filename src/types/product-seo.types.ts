@@ -22,6 +22,13 @@ export type NormalizedSapoProduct = {
 export type BookDNA = {
   bookType: string;
   genreOrCategory: string;
+  readerDNA: string;
+  buyerDNA: string;
+  readingExperience: string;
+  corePromise: string;
+  competitiveAdvantage: string;
+  positioningStatement: string;
+  selectedFramework: string;
   corePremise: string;
   coreAppeal: string;
   emotionalPromise: string;
@@ -93,4 +100,32 @@ export type ProductSeoPendingJob = {
     warnings: string[];
   };
   createdAt: number;
+};
+
+export type ProductSeoHumanEnrichment = {
+  dataType: string;
+  summary: string;
+  insights: string[];
+  createdAt: number;
+};
+
+export type ProductSeoBookUnderstandingJob = {
+  type: "product_seo_book_understanding";
+  jobId: string;
+  userId: number;
+  product: NormalizedSapoProduct;
+  productId: string | number;
+  productAlias: string;
+  productTitle: string;
+  bookDNA: BookDNA;
+  audit: ProductSeoMarketingAudit;
+  enrichments: ProductSeoHumanEnrichment[];
+  createdAt: number;
+};
+
+export type HumanBookEnrichmentResult = {
+  dataType: string;
+  summary: string;
+  insights: string[];
+  updatedBookDNA: BookDNA;
 };

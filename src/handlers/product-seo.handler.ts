@@ -1,19 +1,25 @@
 import { randomUUID } from "node:crypto";
 import { Context } from "telegraf";
-import { analyzeBookDNA } from "../services/book-dna.service";
+import { analyzeBookDNA, enrichBookDNA } from "../services/book-dna.service";
 import { auditProductSeoMarketing, stripHtml } from "../services/product-audit.service";
 import { generateProductSeoMarketing } from "../services/ai-product-seo.service";
 import { extractNhanamProductAlias } from "../services/product-url.service";
 import { sapoProductService } from "../services/sapo-product.service";
 import {
   deleteDetectedProductUrlJob,
+  clearProductSeoEnrichmentWait,
+  deleteProductSeoBookUnderstandingJob,
   deleteProductSeoPendingJob,
   getDetectedProductUrlJob,
+  getProductSeoBookUnderstandingJob,
+  getProductSeoEnrichmentWait,
   getProductSeoPendingJob,
   saveDetectedProductUrlJob,
+  saveProductSeoBookUnderstandingJob,
+  setProductSeoEnrichmentWait,
   saveProductSeoPendingJob
 } from "../services/product-seo-job-store.service";
-import { ProductSeoPendingJob } from "../types/product-seo.types";
+import { ProductSeoBookUnderstandingJob, ProductSeoPendingJob } from "../types/product-seo.types";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
@@ -165,6 +171,63 @@ function buildActionButtons(jobId: string): InlineKeyboardButton[][] {
   ];
 }
 
+function buildBookDnaButtons(jobId: string): InlineKeyboardButton[][] {
+  return [
+    [{ text: "Viết ngay", callback_data: `seo_write:${jobId}` }],
+    [{ text: "Bổ sung dữ liệu", callback_data: `seo_enrich:${jobId}` }],
+    [{ text: "Hủy", callback_data: `seo_cancel_book:${jobId}` }]
+  ];
+}
+
+function buildEnrichedBookDnaButtons(jobId: string): InlineKeyboardButton[][] {
+  return [
+    [{ text: "Viết nội dung", callback_data: `seo_write:${jobId}` }],
+    [{ text: "Bổ sung thêm dữ liệu", callback_data: `seo_enrich:${jobId}` }],
+    [{ text: "Hủy", callback_data: `seo_cancel_book:${jobId}` }]
+  ];
+}
+
+function buildBookDnaMessage(job: ProductSeoBookUnderstandingJob): string {
+  const latestEnrichment = job.enrichments[job.enrichments.length - 1];
+  const lines = [
+    "BOOK DNA",
+    "",
+    `Tên: ${job.productTitle}`,
+    `Alias: ${job.productAlias}`,
+    `ID: ${job.productId}`,
+    "",
+    `Positioning: ${job.bookDNA.positioningStatement || "Chưa rõ"}`,
+    `Reader DNA: ${job.bookDNA.readerDNA || "Chưa rõ"}`,
+    `Buyer DNA: ${job.bookDNA.buyerDNA || "Chưa rõ"}`,
+    `Reading Experience: ${job.bookDNA.readingExperience || "Chưa rõ"}`,
+    `Core Promise: ${job.bookDNA.corePromise || "Chưa rõ"}`,
+    `Competitive Advantage: ${job.bookDNA.competitiveAdvantage || "Chưa rõ"}`,
+    `Framework: ${job.bookDNA.selectedFramework || "Chưa rõ"}`,
+    `Confidence: ${job.bookDNA.confidence}/100`
+  ];
+
+  if (latestEnrichment) {
+    lines.push(
+      "",
+      "Dữ liệu vừa bổ sung:",
+      `Loại dữ liệu: ${latestEnrichment.dataType}`,
+      `Tóm tắt: ${latestEnrichment.summary}`,
+      "Insight hữu ích:",
+      formatList(latestEnrichment.insights)
+    );
+  }
+
+  if (job.bookDNA.confidence < 40) {
+    lines.push(
+      "",
+      "Cảnh báo: dữ liệu sản phẩm hiện quá ít hoặc Positioning Statement còn yếu. Nên bổ sung mô tả gốc, back cover, thông tin tác giả, review hoặc ghi chú BTV trước khi viết."
+    );
+  }
+
+  lines.push("", "Bạn có muốn bổ sung thêm dữ liệu trước khi viết không?");
+  return truncatePreview(lines.join("\n"));
+}
+
 async function analyzeProductByAlias(ctx: Context, userId: number, alias: string): Promise<void> {
   logger.info("product_alias_extracted", { userId, alias });
   await replySafely(ctx, "Đang tìm sản phẩm và phân tích Book DNA...", { userId, alias });
@@ -199,26 +262,77 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
     marketingScore: audit.currentMarketingScore
   });
 
-  const aiResult = await generateProductSeoMarketing({ product, audit, bookDNA });
+  const job: ProductSeoBookUnderstandingJob = {
+    type: "product_seo_book_understanding",
+    jobId: randomUUID(),
+    userId,
+    product,
+    productId: product.id,
+    productAlias: alias,
+    productTitle: product.title,
+    bookDNA,
+    audit,
+    enrichments: [],
+    createdAt: Date.now()
+  };
+
+  saveProductSeoBookUnderstandingJob(job);
+  logger.info("product_seo_pending_created", { userId, jobId: job.jobId, productId: product.id, alias });
+  await replyWithButtonsSafely(ctx, buildBookDnaMessage(job), buildBookDnaButtons(job.jobId), {
+    userId,
+    jobId: job.jobId,
+    productId: product.id,
+    alias
+  });
+}
+
+async function generateWritingPreviewFromBookJob(
+  ctx: Context,
+  userId: number,
+  bookJob: ProductSeoBookUnderstandingJob
+): Promise<void> {
+  const audit = auditProductSeoMarketing(bookJob.product, bookJob.bookDNA);
+  logger.info("product_audit_completed", {
+    userId,
+    jobId: bookJob.jobId,
+    productId: bookJob.productId,
+    alias: bookJob.productAlias,
+    seoScore: audit.currentSeoScore,
+    marketingScore: audit.currentMarketingScore
+  });
+
+  await replySafely(ctx, "Đã có Final Book Understanding. Đang viết preview mô tả sản phẩm...", {
+    userId,
+    jobId: bookJob.jobId,
+    productId: bookJob.productId,
+    alias: bookJob.productAlias
+  });
+
+  const aiResult = await generateProductSeoMarketing({
+    product: bookJob.product,
+    audit,
+    bookDNA: bookJob.bookDNA
+  });
   logger.info("ai_product_seo_generated", {
     userId,
-    productId: product.id,
-    alias,
+    jobId: bookJob.jobId,
+    productId: bookJob.productId,
+    alias: bookJob.productAlias,
     improvedSeoScore: aiResult.improvedSeoScore,
     improvedMarketingScore: aiResult.improvedMarketingScore
   });
 
-  const job: ProductSeoPendingJob = {
+  const updateJob: ProductSeoPendingJob = {
     type: "product_seo_marketing_update",
-    jobId: randomUUID(),
+    jobId: bookJob.jobId,
     userId,
-    productId: product.id,
-    productAlias: alias,
-    productTitle: product.title,
+    productId: bookJob.productId,
+    productAlias: bookJob.productAlias,
+    productTitle: bookJob.productTitle,
     seoTitle: aiResult.seoTitle,
     metaDescription: aiResult.metaDescription,
     finalBodyHtml: aiResult.finalBodyHtml,
-    bookDNA,
+    bookDNA: bookJob.bookDNA,
     audit: {
       currentSeoScore: audit.currentSeoScore,
       currentMarketingScore: audit.currentMarketingScore,
@@ -231,13 +345,20 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
     createdAt: Date.now()
   };
 
-  saveProductSeoPendingJob(job);
-  logger.info("product_seo_pending_created", { userId, jobId: job.jobId, productId: product.id, alias });
-  await replyWithButtonsSafely(ctx, buildPreviewMessage(job), buildActionButtons(job.jobId), {
+  saveProductSeoPendingJob(updateJob);
+  deleteProductSeoBookUnderstandingJob(bookJob.jobId);
+  clearProductSeoEnrichmentWait(userId);
+  logger.info("product_seo_pending_created", {
     userId,
-    jobId: job.jobId,
-    productId: product.id,
-    alias
+    jobId: updateJob.jobId,
+    productId: updateJob.productId,
+    alias: updateJob.productAlias
+  });
+  await replyWithButtonsSafely(ctx, buildPreviewMessage(updateJob), buildActionButtons(updateJob.jobId), {
+    userId,
+    jobId: updateJob.jobId,
+    productId: updateJob.productId,
+    alias: updateJob.productAlias
   });
 }
 
@@ -379,6 +500,100 @@ export async function handleDetectedProductUrl(ctx: TextContext): Promise<boolea
   return true;
 }
 
+export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<boolean> {
+  const userId = getUserId(ctx);
+  const text = ctx.message.text?.trim();
+
+  if (!userId || !text) {
+    return false;
+  }
+
+  const job = getProductSeoEnrichmentWait(userId);
+  if (!job) {
+    return false;
+  }
+
+  try {
+    await replySafely(ctx, "Đang đọc dữ liệu bổ sung và cập nhật lại Book DNA...", {
+      userId,
+      jobId: job.jobId,
+      productId: job.productId,
+      alias: job.productAlias
+    });
+
+    logger.info("book_dna_started", {
+      userId,
+      jobId: job.jobId,
+      productId: job.productId,
+      alias: job.productAlias
+    });
+    const enrichment = await enrichBookDNA({
+      product: job.product,
+      currentBookDNA: job.bookDNA,
+      enrichmentText: text
+    });
+
+    const updatedJob: ProductSeoBookUnderstandingJob = {
+      ...job,
+      bookDNA: enrichment.updatedBookDNA,
+      audit: auditProductSeoMarketing(job.product, enrichment.updatedBookDNA),
+      createdAt: Date.now(),
+      enrichments: [
+        ...job.enrichments,
+        {
+          dataType: enrichment.dataType,
+          summary: enrichment.summary,
+          insights: enrichment.insights,
+          createdAt: Date.now()
+        }
+      ]
+    };
+
+    saveProductSeoBookUnderstandingJob(updatedJob);
+    clearProductSeoEnrichmentWait(userId);
+    logger.info("book_dna_completed", {
+      userId,
+      jobId: updatedJob.jobId,
+      productId: updatedJob.productId,
+      alias: updatedJob.productAlias,
+      confidence: updatedJob.bookDNA.confidence
+    });
+    logger.info("product_audit_completed", {
+      userId,
+      jobId: updatedJob.jobId,
+      productId: updatedJob.productId,
+      alias: updatedJob.productAlias,
+      seoScore: updatedJob.audit.currentSeoScore,
+      marketingScore: updatedJob.audit.currentMarketingScore
+    });
+
+    await replyWithButtonsSafely(ctx, buildBookDnaMessage(updatedJob), buildEnrichedBookDnaButtons(updatedJob.jobId), {
+      userId,
+      jobId: updatedJob.jobId,
+      productId: updatedJob.productId,
+      alias: updatedJob.productAlias
+    });
+    return true;
+  } catch (error) {
+    clearProductSeoEnrichmentWait(userId);
+    const reason = formatFriendlyError(error);
+    logger.error("product_seo_update_failed", {
+      userId,
+      jobId: job.jobId,
+      productId: job.productId,
+      alias: job.productAlias,
+      reason
+    });
+    await replySafely(ctx, `Không cập nhật được Book DNA từ dữ liệu bổ sung: ${reason}`, {
+      userId,
+      jobId: job.jobId,
+      productId: job.productId,
+      alias: job.productAlias
+    });
+    return true;
+  }
+}
+
 export async function handleProductSeoCallback(ctx: Context): Promise<void> {
   const userId = getUserId(ctx);
   const data = getCallbackData(ctx);
@@ -416,6 +631,69 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
     deleteDetectedProductUrlJob(jobId);
     logger.info("product_seo_cancelled", { userId, jobId });
     await replySafely(ctx, "Đã hủy. Chưa có thay đổi nào trên Sapo.", { userId, jobId });
+    return;
+  }
+
+  if (action === "seo_cancel_book") {
+    const bookJob = getProductSeoBookUnderstandingJob(jobId, userId);
+    if (!bookJob) {
+      await replySafely(ctx, "Job xác nhận đã hết hạn hoặc không thuộc user này.", { userId, jobId });
+      return;
+    }
+
+    deleteProductSeoBookUnderstandingJob(jobId);
+    logger.info("product_seo_cancelled", { userId, jobId, productId: bookJob.productId, alias: bookJob.productAlias });
+    await replySafely(ctx, "Đã hủy. Chưa có thay đổi nào trên Sapo.", { userId, jobId });
+    return;
+  }
+
+  if (action === "seo_enrich") {
+    const bookJob = getProductSeoBookUnderstandingJob(jobId, userId);
+    if (!bookJob) {
+      await replySafely(ctx, "Job xác nhận đã hết hạn hoặc không thuộc user này.", { userId, jobId });
+      return;
+    }
+
+    setProductSeoEnrichmentWait(userId, jobId);
+    await replySafely(
+      ctx,
+      [
+        "Bạn gửi thêm dữ liệu cho cuốn sách này nhé.",
+        "",
+        "Có thể gửi text, link website, link bài báo, link Wikipedia/Nhã Nam, back cover, review, thư giới thiệu sách hoặc ghi chú BTV.",
+        "",
+        "Bot sẽ đọc dữ liệu mới, tóm tắt insight, cập nhật lại Book DNA rồi mới hỏi có viết nội dung không."
+      ].join("\n"),
+      { userId, jobId, productId: bookJob.productId, alias: bookJob.productAlias }
+    );
+    return;
+  }
+
+  if (action === "seo_write") {
+    const bookJob = getProductSeoBookUnderstandingJob(jobId, userId);
+    if (!bookJob) {
+      await replySafely(ctx, "Job xác nhận đã hết hạn hoặc không thuộc user này.", { userId, jobId });
+      return;
+    }
+
+    try {
+      await generateWritingPreviewFromBookJob(ctx, userId, bookJob);
+    } catch (error) {
+      const reason = formatFriendlyError(error);
+      logger.error("product_seo_update_failed", {
+        userId,
+        jobId,
+        productId: bookJob.productId,
+        alias: bookJob.productAlias,
+        reason
+      });
+      await replySafely(ctx, `Không viết được nội dung sản phẩm: ${reason}`, {
+        userId,
+        jobId,
+        productId: bookJob.productId,
+        alias: bookJob.productAlias
+      });
+    }
     return;
   }
 

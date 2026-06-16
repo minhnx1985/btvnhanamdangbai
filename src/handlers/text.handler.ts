@@ -9,7 +9,7 @@ import { LinkedProduct } from "../types/sapo";
 import { PostType } from "../types/session";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
-import { handleDetectedProductUrl } from "./product-seo.handler";
+import { handleDetectedProductUrl, handleProductSeoEnrichmentText } from "./product-seo.handler";
 
 type TextContext = Context & {
   message: {
@@ -145,7 +145,11 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
   const session = getSession(userId);
 
   try {
-    if (text.toLowerCase().startsWith("/seo")) {
+    if (text.startsWith("/")) {
+      return;
+    }
+
+    if (await handleProductSeoEnrichmentText(ctx)) {
       return;
     }
 
