@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Context } from "telegraf";
+import { canEditProducts } from "../bot/guards";
 import { analyzeBookDNA, enrichBookDNA } from "../services/book-dna.service";
 import { auditProductSeoMarketing, stripHtml } from "../services/product-audit.service";
 import { generateProductSeoMarketing } from "../services/ai-product-seo.service";
@@ -38,6 +39,8 @@ type InlineKeyboardButton = {
 const MAX_PREVIEW_LENGTH = 3400;
 const SEO_FIELDS_DISABLED_MESSAGE =
   "Hiện chưa xác định chắc field SEO trong Sapo Product API. Bot chưa cập nhật SEO fields.";
+const PRODUCT_EDIT_FORBIDDEN_MESSAGE =
+  "Bạn không có quyền sửa sản phẩm Sapo. Chỉ Telegram ID 1623038607 được phép cập nhật sản phẩm; phần blog vẫn dùng bình thường.";
 
 function getUserId(ctx: Context): number | undefined {
   return ctx.from?.id;
@@ -58,6 +61,20 @@ function getCallbackData(ctx: Context): string | undefined {
   }
 
   return callbackQuery.data;
+}
+
+async function rejectProductEditIfNeeded(
+  ctx: Context,
+  userId: number,
+  logContext: Record<string, unknown> = {}
+): Promise<boolean> {
+  if (canEditProducts(userId)) {
+    return false;
+  }
+
+  logger.warn("product_edit_forbidden", { userId, ...logContext });
+  await replySafely(ctx, PRODUCT_EDIT_FORBIDDEN_MESSAGE, { userId, ...logContext });
+  return true;
 }
 
 async function replyWithButtonsSafely(
@@ -445,6 +462,10 @@ export async function handleTestUpdateCommand(ctx: Context): Promise<void> {
     return;
   }
 
+  if (await rejectProductEditIfNeeded(ctx, userId, { alias, command: "testupdate" })) {
+    return;
+  }
+
   try {
     const product = await sapoProductService.findProductByAlias(alias);
     if (!product || !product.id) {
@@ -712,6 +733,17 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
     }
 
     if (action === "seo_desc") {
+      if (
+        await rejectProductEditIfNeeded(ctx, userId, {
+          jobId,
+          productId: job.productId,
+          alias: job.productAlias,
+          action
+        })
+      ) {
+        return;
+      }
+
       await sapoProductService.updateProductContent(job.productId, job.finalBodyHtml, `<!-- seo-bot-update:${job.jobId} -->`, {
         userId,
         jobId,
@@ -738,6 +770,17 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
     }
 
     if (action === "seo_all") {
+      if (
+        await rejectProductEditIfNeeded(ctx, userId, {
+          jobId,
+          productId: job.productId,
+          alias: job.productAlias,
+          action
+        })
+      ) {
+        return;
+      }
+
       await sapoProductService.updateProductContent(job.productId, job.finalBodyHtml, `<!-- seo-bot-update:${job.jobId} -->`, {
         userId,
         jobId,
