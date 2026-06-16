@@ -9,6 +9,7 @@ import { LinkedProduct } from "../types/sapo";
 import { PostType } from "../types/session";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
+import { handleDetectedProductUrl } from "./product-seo.handler";
 
 type TextContext = Context & {
   message: {
@@ -24,7 +25,6 @@ type DraftSubmissionInput = {
   postType: PostType;
   tags?: string;
   linkedProducts?: LinkedProduct[];
-  useAiFormat?: boolean;
 };
 
 function isSkipProductLinkInput(text: string): boolean {
@@ -60,16 +60,6 @@ function mergeTags(existingTag: string | undefined, keywords: string[]): string 
   return merged.length > 0 ? merged.join(", ") : undefined;
 }
 
-function isYesInput(text: string): boolean {
-  const normalized = text.trim().toLowerCase();
-  return ["co", "có", "yes", "y", "ok", "okay"].includes(normalized);
-}
-
-function isNoInput(text: string): boolean {
-  const normalized = text.trim().toLowerCase();
-  return ["khong", "không", "ko", "k", "no", "n"].includes(normalized);
-}
-
 async function generateAutomaticTags(input: DraftSubmissionInput): Promise<string | undefined> {
   try {
     const keywords = await shopApiService.generateKeywordTags({
@@ -96,36 +86,10 @@ export async function submitDraftPost(
   const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
 
   try {
-    let aiFormatNote: string | undefined;
-    let contentHtml: string;
-
-    if (input.useAiFormat) {
-      try {
-        contentHtml = await shopApiService.formatContentHtml({
-          title: input.title,
-          content: input.content
-        });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : "AI format không đạt kiểm tra";
-        logger.warn("AI formatting skipped, falling back to plain HTML", {
-          userId,
-          postType: input.postType,
-          reason
-        });
-        aiFormatNote = "AI format không đạt kiểm tra giữ nguyên nội dung, đã dùng format thường.";
-        await replySafely(ctx, `⚠️ ${aiFormatNote}`, { userId, postType: input.postType });
-        contentHtml = plainTextToHtml(input.content, {
-          embedDirectImageLinks: !isAuthorPost,
-          linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
-        });
-      }
-    } else {
-      contentHtml = plainTextToHtml(input.content, {
-        embedDirectImageLinks: !isAuthorPost,
-        linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
-      });
-    }
-
+    const contentHtml = plainTextToHtml(input.content, {
+      embedDirectImageLinks: !isAuthorPost,
+      linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
+    });
     const tags = await generateAutomaticTags(input);
 
     const result = await sapoService.createDraftArticle({
@@ -160,10 +124,6 @@ export async function submitDraftPost(
       lines.push(`- Tag: ${tags}`);
     }
 
-    if (aiFormatNote) {
-      lines.push(`- Ghi chú: ${aiFormatNote}`);
-    }
-
     await replySafely(ctx, lines.join("\n"), { userId, postType: input.postType, articleId: result.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lỗi hệ thống, vui lòng thử lại";
@@ -185,7 +145,15 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
   const session = getSession(userId);
 
   try {
+    if (text.toLowerCase().startsWith("/seo")) {
+      return;
+    }
+
     if (session.state === "idle") {
+      if (await handleDetectedProductUrl(ctx)) {
+        return;
+      }
+
       await replySafely(ctx, messages.genericStartFlow, { userId });
       return;
     }
@@ -226,45 +194,38 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       }
 
       if (isSkipProductLinkInput(text)) {
-        setSession(userId, {
-          state: "waiting_ai_format_choice",
-          postType: "blog",
+        await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType
+          imageMimeType: session.imageMimeType,
+          postType: "blog"
         });
-        await replySafely(ctx, messages.askAiFormat, { userId });
         return;
       }
 
       try {
         const resolvedProducts = await sapoService.resolveProductLinks(text);
-        setSession(userId, {
-          state: "waiting_ai_format_choice",
-          postType: "blog",
+        await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
           tags: resolvedProducts.tag,
-          productTag: resolvedProducts.tag,
-          linkedProducts: resolvedProducts.linkedProducts
+          linkedProducts: resolvedProducts.linkedProducts,
+          postType: "blog"
         });
-        await replySafely(ctx, messages.askAiFormat, { userId });
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Skip invalid product links";
         logger.warn("product link resolution failed", { userId, reason: message });
-        setSession(userId, {
-          state: "waiting_ai_format_choice",
-          postType: "blog",
+        await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType
+          imageMimeType: session.imageMimeType,
+          postType: "blog"
         });
-        await replySafely(ctx, messages.askAiFormat, { userId });
         return;
       }
     }
@@ -277,64 +238,27 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       }
 
       if (isSkipKeywordsInput(text)) {
-        setSession(userId, {
-          state: "waiting_ai_format_choice",
-          postType: "blog",
+        await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
           tags: session.productTag,
-          productTag: session.productTag,
-          linkedProducts: session.linkedProducts
+          linkedProducts: session.linkedProducts,
+          postType: "blog"
         });
-        await replySafely(ctx, messages.askAiFormat, { userId });
         return;
       }
 
       const keywordTags = parseKeywordTags(text);
-      const tags = mergeTags(session.productTag, keywordTags);
-      setSession(userId, {
-        state: "waiting_ai_format_choice",
-        postType: "blog",
-        title: session.title,
-        content: session.content,
-        imageBase64: session.imageBase64,
-        imageMimeType: session.imageMimeType,
-        tags,
-        productTag: session.productTag,
-        linkedProducts: session.linkedProducts
-      });
-      await replySafely(ctx, messages.askAiFormat, { userId });
-      return;
-    }
-
-    if (session.state === "waiting_ai_format_choice") {
-      if (!session.title || !session.content || !session.imageBase64 || !session.imageMimeType || !session.postType) {
-        resetSession(userId);
-        await replySafely(ctx, "❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại", { userId });
-        return;
-      }
-
-      if (!isYesInput(text) && !isNoInput(text)) {
-        await replySafely(ctx, messages.waitAiFormatChoiceText, { userId });
-        return;
-      }
-
-      const useAiFormat = isYesInput(text);
-      if (useAiFormat) {
-        await replySafely(ctx, messages.formattingWithAi, { userId, postType: session.postType });
-      }
-
       await submitDraftPost(ctx, userId, {
         title: session.title,
         content: session.content,
         imageBase64: session.imageBase64,
         imageMimeType: session.imageMimeType,
-        postType: session.postType,
-        tags: session.tags ?? session.productTag,
+        tags: mergeTags(session.productTag, keywordTags),
         linkedProducts: session.linkedProducts,
-        useAiFormat
+        postType: "blog"
       });
       return;
     }

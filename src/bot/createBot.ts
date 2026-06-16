@@ -6,6 +6,7 @@ import { handleAuthor } from "../handlers/author.handler";
 import { handleCancel } from "../handlers/cancel.handler";
 import { handleNewPost } from "../handlers/newpost.handler";
 import { handlePhotoMessage } from "../handlers/photo.handler";
+import { handleProductSeoCallback, handleSeoCommand } from "../handlers/product-seo.handler";
 import { handleStart } from "../handlers/start.handler";
 import { handleTextMessage } from "../handlers/text.handler";
 import { getSession } from "./sessionStore";
@@ -34,6 +35,8 @@ export function createBot(): Telegraf<Context> {
   bot.command("newpost", handleNewPost);
   bot.command("author", handleAuthor);
   bot.command("cancel", handleCancel);
+  bot.command("seo", handleSeoCommand);
+  bot.on("callback_query", handleProductSeoCallback);
 
   bot.on("text", async (ctx) => {
     if (!isAuthorizedUser(ctx.from?.id)) {
@@ -83,11 +86,6 @@ export function createBot(): Telegraf<Context> {
 
     if (session.state === "waiting_keywords") {
       await replySafely(ctx, messages.waitKeywordsText, { userId });
-      return;
-    }
-
-    if (session.state === "waiting_ai_format_choice") {
-      await replySafely(ctx, messages.waitAiFormatChoiceText, { userId });
       return;
     }
 

@@ -100,7 +100,15 @@ function renderInlineText(text: string, linkedProducts: LinkedProduct[]): string
 
 function buildTextParagraph(lines: string[], linkedProducts: LinkedProduct[]): string {
   const renderedLines = lines.map((line) => renderInlineText(line, linkedProducts));
-  return `<div style="line-height: 1.35; text-align: justify;">${renderedLines.join("<br />")}</div>`;
+  return `<div style="line-height: 1.2; margin-bottom: 1.5em; text-align: justify;">${renderedLines.join("<br />")}</div>`;
+}
+
+export function applyReadableSpacingToHtml(html: string): string {
+  return html
+    .replace(/<p>/g, `<p style="line-height: 1.2; margin-bottom: 1.5em;">`)
+    .replace(/<li>/g, `<li style="line-height: 1.2; margin-bottom: 0.5em;">`)
+    .replace(/<h2>/g, `<h2 style="line-height: 1.2; margin: 1.5em 0 0.75em;">`)
+    .replace(/<h3>/g, `<h3 style="line-height: 1.2; margin: 1.5em 0 0.75em;">`);
 }
 
 export function plainTextToHtml(text: string, options: PlainTextToHtmlOptions = {}): string {

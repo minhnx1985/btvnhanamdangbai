@@ -7,7 +7,7 @@ Bot Telegram nhan tieu de, noi dung va anh feature, sau do tao bai viet blog tre
 - Node.js 20+
 - Tai khoan Telegram de tao bot voi BotFather
 - Sapo private app credentials
-- ShopAPI key de format AI va tao tu khoa tu dong
+- ShopAPI key de tao tu khoa tu dong va de xuat SEO san pham
 
 ## Cai dat
 
@@ -139,6 +139,7 @@ Luu y:
 
 - `/start`: Gioi thieu bot va huong dan su dung
 - `/newpost`: Bat dau tao bai viet moi
+- `/seo <url>`: Phan tich va de xuat toi uu SEO/marketing cho san pham Nha Nam
 - `/cancel`: Huy thao tac hien tai
 
 ## Flow su dung
@@ -148,15 +149,22 @@ Luu y:
 3. Gui noi dung
 4. Gui anh feature
 5. Gui link san pham hoac `BO QUA`
-6. Chon co format bang AI khong bang `CO` hoac `KHONG`
 
 Bot se tu tao tu khoa bang ShopAPI, merge voi tag san pham neu co, tao bai viet nhap trong blog mac dinh va tra ket qua ve Telegram.
+
+## Flow SEO san pham
+
+1. Gui `/seo https://nhanam.vn/<alias>` hoac gui URL san pham Nha Nam khi bot dang idle.
+2. Bot tim san pham trong Sapo theo alias.
+3. Bot audit nhanh SEO/marketing va dung ShopAPI de tao de xuat.
+4. Bot hien preview va 4 nut: cap nhat mo ta, cap nhat SEO, cap nhat tat ca, huy.
+5. Bot chi update Sapo sau khi bam nut xac nhan.
 
 ## Troubleshooting
 
 - `Bạn không có quyền sử dụng bot này.`: Kiem tra `BOT_ALLOWED_USER_IDS`.
 - `Sapo API xác thực thất bại`: Kiem tra `SAPO_API_KEY` va `SAPO_API_SECRET`.
 - `Không tìm thấy blog mặc định trên Sapo`: Kiem tra `SAPO_DEFAULT_BLOG_NAME`.
-- `Thiếu SHOPAPI_API_KEY để dùng AI`: Them `SHOPAPI_API_KEY` tren Render hoac trong `.env`.
+- `Thiếu SHOPAPI_API_KEY để dùng AI`: Them `SHOPAPI_API_KEY` tren Render hoac trong `.env` de tao tu khoa va de xuat SEO san pham.
 - `Không thể xử lý ảnh dưới 1MB`: Thu anh nho hon hoac anh it chi tiet hon.
 - Bot khong nhan webhook: Kiem tra `TELEGRAM_WEBHOOK_URL`, SSL, va route `/telegram/webhook`.

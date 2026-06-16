@@ -5,6 +5,7 @@ import { compressImageUnder1MB } from "../services/image.service";
 import { downloadTelegramPhoto } from "../services/telegram-file.service";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
+import { submitDraftPost } from "./text.handler";
 
 type PhotoContext = Context & {
   message: {
@@ -46,11 +47,6 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
     return;
   }
 
-  if (session.state === "waiting_ai_format_choice") {
-    await replySafely(ctx, messages.waitAiFormatChoiceText, { userId });
-    return;
-  }
-
   if (session.state !== "waiting_image" && session.state !== "waiting_content") {
     await replySafely(ctx, messages.genericStartFlow, { userId });
     return;
@@ -73,15 +69,13 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
     });
 
     if ((session.postType ?? "blog") === "author") {
-      setSession(userId, {
-        state: "waiting_ai_format_choice",
-        postType: "author",
+      await submitDraftPost(ctx, userId, {
         title: session.title,
         content: session.content,
         imageBase64: processedImage.base64,
-        imageMimeType: processedImage.mimeType
+        imageMimeType: processedImage.mimeType,
+        postType: "author"
       });
-      await replySafely(ctx, messages.askAiFormat, { userId, postType: "author" });
       return;
     }
 
