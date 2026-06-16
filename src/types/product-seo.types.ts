@@ -26,9 +26,17 @@ export type ProductSeoMarketingAudit = {
   opportunities: string[];
 };
 
+export type ProductResearchSource = {
+  source: string;
+  title: string;
+  url?: string;
+  summary: string;
+};
+
 export type ProductSeoMarketingInput = {
   product: NormalizedSapoProduct;
   audit: ProductSeoMarketingAudit;
+  researchSources: ProductResearchSource[];
 };
 
 export type ProductSeoMarketingResult = {
@@ -61,6 +69,7 @@ export type ProductSeoPendingJob = {
     issues: string[];
     opportunities: string[];
     warnings: string[];
+    researchSources: ProductResearchSource[];
   };
   createdAt: number;
 };

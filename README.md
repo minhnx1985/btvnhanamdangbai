@@ -156,7 +156,7 @@ Bot se tu tao tu khoa bang ShopAPI, merge voi tag san pham neu co, tao bai viet 
 
 1. Gui `/seo https://nhanam.vn/<alias>` hoac gui URL san pham Nha Nam khi bot dang idle.
 2. Bot tim san pham trong Sapo theo alias.
-3. Bot audit nhanh SEO/marketing va dung ShopAPI de tao de xuat.
+3. Bot audit nhanh SEO/marketing, tim them thong tin cong khai tu nguon ngoai, va dung ShopAPI de tao de xuat.
 4. Bot hien preview va 4 nut: cap nhat mo ta, cap nhat SEO, cap nhat tat ca, huy.
 5. Bot chi update Sapo sau khi bam nut xac nhan.
 

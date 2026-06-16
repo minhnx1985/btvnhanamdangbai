@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Context } from "telegraf";
 import { auditProductSeoMarketing } from "../services/product-audit.service";
 import { generateProductSeoMarketing } from "../services/ai-product-seo.service";
+import { productResearchService } from "../services/product-research.service";
 import { extractNhanamProductAlias } from "../services/product-url.service";
 import { sapoProductService } from "../services/sapo-product.service";
 import {
@@ -135,6 +136,17 @@ function buildPreviewMessage(job: ProductSeoPendingJob): string {
     preview.push("", "Cảnh báo:", formatList(job.audit.warnings));
   }
 
+  if (job.audit.researchSources.length > 0) {
+    preview.push(
+      "",
+      "Nguồn tham khảo đã dùng:",
+      job.audit.researchSources
+        .slice(0, 3)
+        .map((source) => `- ${source.title}${source.url ? ` (${source.url})` : ""}`)
+        .join("\n")
+    );
+  }
+
   return truncatePreview(preview.join("\n")).text;
 }
 
@@ -168,7 +180,15 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
     marketingScore: audit.currentMarketingScore
   });
 
-  const aiResult = await generateProductSeoMarketing({ product, audit });
+  const researchSources = await productResearchService.researchProduct(product);
+  logger.info("product_external_research_completed", {
+    userId,
+    productId: product.id,
+    alias,
+    sourceCount: researchSources.length
+  });
+
+  const aiResult = await generateProductSeoMarketing({ product, audit, researchSources });
   logger.info("ai_product_seo_generated", {
     userId,
     productId: product.id,
@@ -194,7 +214,8 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
       improvedMarketingScore: aiResult.improvedMarketingScore,
       issues: audit.issues,
       opportunities: audit.opportunities,
-      warnings: aiResult.warnings
+      warnings: aiResult.warnings,
+      researchSources
     },
     createdAt: Date.now()
   };

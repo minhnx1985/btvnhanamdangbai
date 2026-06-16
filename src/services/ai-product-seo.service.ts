@@ -30,7 +30,8 @@ export async function generateProductSeoMarketing(
         "Bạn là trợ lý SEO và marketing nội dung sản phẩm sách cho website Nhã Nam.",
         "",
         "Nhiệm vụ:",
-        "Tối ưu trang sản phẩm dựa hoàn toàn trên dữ liệu được cung cấp.",
+        "Tối ưu trang sản phẩm dựa trên dữ liệu sản phẩm và nguồn ngoài đã được cung cấp.",
+        "Ưu tiên viết lại mô tả theo hướng marketing rõ ràng, thuyết phục, có ích cho chuyển đổi, nhưng vẫn giữ giọng biên tập Nhã Nam.",
         "",
         "Bạn cần tạo:",
         "1. Meta title",
@@ -40,15 +41,17 @@ export async function generateProductSeoMarketing(
         "5. Cảnh báo dữ liệu bất thường nếu có",
         "",
         "Nguyên tắc bắt buộc:",
-        "- Không bịa thông tin ngoài dữ liệu đầu vào.",
-        "- Không thêm giải thưởng, độ tuổi, review, nội dung sách nếu dữ liệu không có.",
+        "- Không bịa thông tin ngoài dữ liệu sản phẩm hoặc nguồn ngoài được cung cấp.",
+        "- Có thể dùng thông tin tác giả, tác phẩm, bối cảnh, chủ đề từ nguồn ngoài được cung cấp.",
+        "- Không thêm giải thưởng, độ tuổi, review, nội dung sách nếu dữ liệu sản phẩm và nguồn ngoài không có.",
         "- Không thay đổi tên sách, tác giả, NXB, số trang, giá, mã sản phẩm.",
-        "- Nếu dữ liệu thiếu, hãy viết trung tính hoặc bỏ section đó.",
+        "- Nếu dữ liệu thiếu hoặc nguồn ngoài không đủ chắc, hãy viết trung tính hoặc bỏ section đó.",
         "- Không dùng giọng quảng cáo quá đà.",
         "- Không dùng các cụm sáo: \"không chỉ... mà còn\", \"điều thú vị là\", \"hành trình khám phá\", \"mở ra cánh cửa\", \"đắm chìm\", \"cuốn sách không thể bỏ qua\".",
         "- Tránh văn AI, tránh câu rỗng, tránh lặp ý.",
         "- Văn phong: biên tập, rõ, đáng tin, phù hợp Nhã Nam.",
         "- SEO nhẹ nhàng, không nhồi keyword.",
+        "- Marketing cần cụ thể: nêu lý do nên đọc, nhóm độc giả phù hợp, điểm nổi bật, CTA mềm.",
         "- HTML sạch cho CMS.",
         "- Chỉ dùng thẻ: p, h2, h3, strong, em, ul, li.",
         "- Không dùng img, iframe, script.",
@@ -82,15 +85,21 @@ export async function generateProductSeoMarketing(
           seoTitle: input.product.seoTitle ?? input.product.metaTitle,
           metaDescription: input.product.metaDescription ?? input.product.seoDescription
         },
-        audit: input.audit
+        audit: input.audit,
+        externalResearch: input.researchSources.map((source) => ({
+          source: source.source,
+          title: source.title,
+          url: source.url,
+          summary: source.summary
+        }))
       })
     }
   ]);
 
-  return normalizeAiResult(result);
+  return normalizeAiResult(result, input.researchSources.length);
 }
 
-function normalizeAiResult(result: RawAiProductSeoResult): ProductSeoMarketingResult {
+function normalizeAiResult(result: RawAiProductSeoResult, researchSourceCount: number): ProductSeoMarketingResult {
   const seoTitle = readRequiredString(result.seoTitle, "seoTitle").slice(0, 70);
   const metaDescription = readRequiredString(result.metaDescription, "metaDescription").slice(0, 170);
   const productDescriptionHtml = sanitizeHtml(readRequiredString(result.productDescriptionHtml, "productDescriptionHtml"));
@@ -107,9 +116,12 @@ function normalizeAiResult(result: RawAiProductSeoResult): ProductSeoMarketingRe
     telegramPreview,
     improvedSeoScore: readScore(result.improvedSeoScore),
     improvedMarketingScore: readScore(result.improvedMarketingScore),
-    warnings: Array.isArray(result.warnings)
+    warnings: [
+      ...(researchSourceCount === 0 ? ["Không tìm được nguồn ngoài đủ rõ; mô tả chủ yếu dựa trên dữ liệu Sapo hiện có."] : []),
+      ...(Array.isArray(result.warnings)
       ? result.warnings.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)
-      : []
+      : [])
+    ]
   };
 }
 
