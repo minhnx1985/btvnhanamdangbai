@@ -209,15 +209,8 @@ function ensureBookUnderstandingReady(input: ProductSeoMarketingInput): void {
     throw new AppError(`Book Understanding chưa đủ để viết: ${missingFields.join(", ")}`, "BOOK_UNDERSTANDING_INCOMPLETE");
   }
 
-  const normalizedPositioning = normalizeForQualityCheck(input.bookDNA.positioningStatement);
-  if (
-    input.bookDNA.positioningStatement.length < 45 ||
-    normalizedPositioning.includes("du lieu hien co cho thay") ||
-    normalizedPositioning.includes("day la mot cuon sach") ||
-    normalizedPositioning.includes("san pham nay")
-  ) {
-    throw new AppError("Positioning Statement yếu hoặc confidence thấp; cần bổ sung dữ liệu thay vì viết lan man.", "BOOK_DNA_WEAK_POSITIONING");
-  }
+  // Weak positioning should make the writer cautious, not block the flow.
+  // Final HTML validation still rejects filler and unsafe generic claims.
 }
 
 async function generateWriterJson(messages: ShopApiChatMessage[]): Promise<RawAiProductSeoResult> {
