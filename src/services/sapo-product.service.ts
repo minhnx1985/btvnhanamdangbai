@@ -1,6 +1,7 @@
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosError, AxiosInstance } from "axios";
 import { config } from "../config/env";
 import { NormalizedSapoProduct } from "../types/product-seo.types";
+import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
 type RawSapoProduct = Record<string, unknown> & {
@@ -55,30 +56,38 @@ class SapoProductService {
   }
 
   async findProductByAlias(alias: string): Promise<NormalizedSapoProduct | null> {
-    const response = await this.client.get<ProductListResponse>(`/admin/products.json?alias=${encodeURIComponent(alias)}`);
-    const products = normalizeProductList(response.data);
-    const product = products.find((item) => getProductAlias(item) === alias) ?? products[0];
+    try {
+      const response = await this.client.get<ProductListResponse>(`/admin/products.json?alias=${encodeURIComponent(alias)}`);
+      const products = normalizeProductList(response.data);
+      const product = products.find((item) => getProductAlias(item) === alias) ?? products[0];
 
-    if (!product) {
-      logger.warn("sapo_product_not_found", { alias });
-      return null;
-    }
+      if (!product) {
+        logger.warn("sapo_product_not_found", { alias });
+        return null;
+      }
 
-    logger.info("sapo_product_found", { productId: product.id, alias });
-    if (product.id) {
-      this.descriptionFieldCache.set(String(product.id), getDescriptionField(product));
+      logger.info("sapo_product_found", { productId: product.id, alias });
+      if (product.id) {
+        this.descriptionFieldCache.set(String(product.id), getDescriptionField(product));
+      }
+      return normalizeProduct(product);
+    } catch (error) {
+      throw mapSapoProductError(error);
     }
-    return normalizeProduct(product);
   }
 
   async updateProductDescription(productId: string | number, html: string): Promise<void> {
     const descriptionField = this.descriptionFieldCache.get(String(productId)) ?? "body_html";
-    await this.client.put<ProductUpdateResponse>(`/admin/products/${productId}.json`, {
-      product: {
-        id: productId,
-        [descriptionField]: html
-      }
-    });
+    try {
+      await this.client.put<ProductUpdateResponse>(`/admin/products/${productId}.json`, {
+        product: {
+          id: productId,
+          [descriptionField]: html
+        }
+      });
+    } catch (error) {
+      throw mapSapoProductError(error);
+    }
   }
 
   async updateProductSeoFields(
@@ -107,6 +116,50 @@ class SapoProductService {
       reason: seoResult.reason
     };
   }
+}
+
+function mapSapoProductError(error: unknown): AppError {
+  if (!axios.isAxiosError(error)) {
+    return new AppError("Lỗi hệ thống khi thao tác sản phẩm Sapo", "SAPO_PRODUCT_UNKNOWN_ERROR");
+  }
+
+  const status = error.response?.status;
+  logger.error("Sapo product response error summary", {
+    status,
+    url: error.config?.url,
+    method: error.config?.method,
+    responseData: summarizeResponseData(error)
+  });
+
+  if (status === 401 || status === 403) {
+    return new AppError(
+      "Sapo API chưa có quyền cập nhật sản phẩm. Vui lòng cấp quyền ghi/cập nhật sản phẩm cho private app/API key rồi thử lại.",
+      "SAPO_PRODUCT_WRITE_FORBIDDEN"
+    );
+  }
+
+  if (status === 404) {
+    return new AppError("Không tìm thấy sản phẩm trên Sapo", "SAPO_PRODUCT_NOT_FOUND");
+  }
+
+  if (status === 422) {
+    return new AppError("Dữ liệu cập nhật sản phẩm không hợp lệ", "SAPO_PRODUCT_INVALID_DATA");
+  }
+
+  if (error.code === "ECONNABORTED" || !error.response) {
+    return new AppError("Không kết nối được tới Sapo khi thao tác sản phẩm", "SAPO_PRODUCT_NETWORK_ERROR");
+  }
+
+  return new AppError("Sapo API sản phẩm trả lỗi không xác định", "SAPO_PRODUCT_UNKNOWN_ERROR");
+}
+
+function summarizeResponseData(error: AxiosError): unknown {
+  const data = error.response?.data;
+  if (typeof data === "string") {
+    return data.slice(0, 500);
+  }
+
+  return data;
 }
 
 function normalizeProductList(data: ProductListResponse): RawSapoProduct[] {

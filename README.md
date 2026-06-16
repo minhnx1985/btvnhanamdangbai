@@ -164,6 +164,7 @@ Bot se tu tao tu khoa bang ShopAPI, merge voi tag san pham neu co, tao bai viet 
 
 - `Bạn không có quyền sử dụng bot này.`: Kiem tra `BOT_ALLOWED_USER_IDS`.
 - `Sapo API xác thực thất bại`: Kiem tra `SAPO_API_KEY` va `SAPO_API_SECRET`.
+- `Sapo API chưa có quyền cập nhật sản phẩm`: Cap quyen ghi/cap nhat san pham cho private app/API key tren Sapo.
 - `Không tìm thấy blog mặc định trên Sapo`: Kiem tra `SAPO_DEFAULT_BLOG_NAME`.
 - `Thiếu SHOPAPI_API_KEY để dùng AI`: Them `SHOPAPI_API_KEY` tren Render hoac trong `.env` de tao tu khoa va de xuat SEO san pham.
 - `Không thể xử lý ảnh dưới 1MB`: Thu anh nho hon hoac anh it chi tiet hon.
