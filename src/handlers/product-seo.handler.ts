@@ -233,6 +233,11 @@ function buildBookDnaMessage(job: ProductSeoBookUnderstandingJob): string {
     `Confidence: ${job.bookDNA.confidence}/100`
   ];
 
+  const foreignPraiseQuotes = job.bookDNA.foreignPraiseQuotes ?? [];
+  if (foreignPraiseQuotes.length > 0) {
+    lines.push("", "Praise báo nước ngoài đã dịch:", formatList(foreignPraiseQuotes));
+  }
+
   if (latestEnrichment) {
     lines.push(
       "",

@@ -39,6 +39,7 @@ export type BookDNA = {
   authorLeverage: string;
   seriesOrBrandLeverage: string;
   comparableTitlesOrSignals: string[];
+  foreignPraiseQuotes: string[];
   toneOfVoice: string;
   marketingAngle: string;
   seoKeywords: string[];

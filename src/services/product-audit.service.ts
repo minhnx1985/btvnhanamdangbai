@@ -126,10 +126,10 @@ export function auditProductSeoMarketing(product: NormalizedSapoProduct, bookDNA
     opportunities.push("Có thể tận dụng lợi thế tác giả/series/tủ sách nếu dữ liệu đủ rõ.");
   }
 
-  if (/mua ngay|đặt mua|tìm đọc|xem thêm|tham khảo/i.test(lowerText)) {
+  if (/gợi|quen thuộc|cảm giác|tự nhận ra|bật cười|suy nghĩ|đọc cùng|trò chuyện|quan sát/i.test(lowerText)) {
     currentMarketingScore += 10;
   } else {
-    opportunities.push("Có thể thêm CTA mềm, không quá quảng cáo.");
+    opportunities.push("Có thể mở bằng một quan sát đời thường/góc nhìn biên tập để bài tự nhiên hơn, không cần CTA.");
   }
 
   if (!hasFiller(plainText)) {

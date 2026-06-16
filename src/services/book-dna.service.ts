@@ -59,6 +59,7 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
         "- Competitive Advantage: why choose this book instead of another.",
         "- Positioning Statement: one exact sentence describing what this book is.",
         "- Selected Framework: the most suitable marketing structure, chosen naturally, not forced.",
+        "- Foreign Praise Quotes: translated Vietnamese versions of supported praise from foreign newspapers, magazines, publishers, or reputable media sources.",
         "",
         "Rules:",
         "- Do not start from metadata. Metadata can support understanding, but it is not the angle.",
@@ -124,6 +125,7 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
           authorLeverage: "",
           seriesOrBrandLeverage: "",
           comparableTitlesOrSignals: [],
+          foreignPraiseQuotes: [],
           toneOfVoice: "",
           marketingAngle: "",
           seoKeywords: [],
@@ -207,6 +209,9 @@ export async function enrichBookDNA(input: HumanEnrichmentInput): Promise<{
         "- Separate Reader DNA from Buyer DNA.",
         "- For children's books, prioritize parent-child value, reading together, play, interaction, curiosity, expression, and participation.",
         "- Do not use page count, book size, paperback binding, or other technical specs as selling points.",
+        "- If the new data includes praise from foreign newspapers, magazines, publishers, or reputable media sources, translate every supported praise quote fully into Vietnamese and store it in updatedBookDNA.foreignPraiseQuotes with source attribution.",
+        "- Preserve the meaning of foreign praise; do not summarize it so much that the quote loses substance.",
+        "- Do not invent praise, source names, reviews, or media coverage. If source attribution is unclear, say so inside the quote entry.",
         "- If the new data is weak or only a URL with little readable content, keep confidence modest and list missingData.",
         "- If Positioning Statement cannot be precise, lower confidence and explain missingData.",
         "",
@@ -235,6 +240,7 @@ export async function enrichBookDNA(input: HumanEnrichmentInput): Promise<{
             authorLeverage: "",
             seriesOrBrandLeverage: "",
             comparableTitlesOrSignals: [],
+            foreignPraiseQuotes: [],
             toneOfVoice: "",
             marketingAngle: "",
             seoKeywords: [],
@@ -398,6 +404,7 @@ function normalizeBookDNA(result: RawBookDNA): BookDNA {
     authorLeverage: readString(result.authorLeverage, "authorLeverage"),
     seriesOrBrandLeverage: readString(result.seriesOrBrandLeverage, "seriesOrBrandLeverage"),
     comparableTitlesOrSignals: readStringArray(result.comparableTitlesOrSignals, "comparableTitlesOrSignals"),
+    foreignPraiseQuotes: readOptionalStringArray(result.foreignPraiseQuotes, "foreignPraiseQuotes"),
     toneOfVoice: readString(result.toneOfVoice, "toneOfVoice"),
     marketingAngle: readString(result.marketingAngle, "marketingAngle"),
     seoKeywords: readStringArray(result.seoKeywords, "seoKeywords"),
@@ -426,6 +433,14 @@ function readStringArray(value: unknown, fieldName: string): string[] {
   }
 
   return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+}
+
+function readOptionalStringArray(value: unknown, fieldName: string): string[] {
+  if (typeof value === "undefined") {
+    return [];
+  }
+
+  return readStringArray(value, fieldName);
 }
 
 function readConfidence(value: unknown): number {
