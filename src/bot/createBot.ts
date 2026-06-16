@@ -9,6 +9,7 @@ import { handlePhotoMessage } from "../handlers/photo.handler";
 import { handleStart } from "../handlers/start.handler";
 import { handleTextMessage } from "../handlers/text.handler";
 import { getSession } from "./sessionStore";
+import { replySafely } from "../utils/telegram";
 
 function isTextMessage(ctx: Context): ctx is Context & { message: { text: string } } {
   return "message" in ctx && !!ctx.message && "text" in ctx.message;
@@ -23,7 +24,9 @@ function isPhotoMessage(ctx: Context): ctx is Context & {
 }
 
 export function createBot(): Telegraf<Context> {
-  const bot = new Telegraf<Context>(config.telegramBotToken);
+  const bot = new Telegraf<Context>(config.telegramBotToken, {
+    handlerTimeout: 5 * 60 * 1000
+  });
 
   bot.use(authorizedOnly());
 
@@ -34,7 +37,7 @@ export function createBot(): Telegraf<Context> {
 
   bot.on("text", async (ctx) => {
     if (!isAuthorizedUser(ctx.from?.id)) {
-      await ctx.reply(messages.unauthorized);
+      await replySafely(ctx, messages.unauthorized, { userId: ctx.from?.id });
       return;
     }
 
@@ -43,7 +46,7 @@ export function createBot(): Telegraf<Context> {
 
   bot.on("photo", async (ctx) => {
     if (!isAuthorizedUser(ctx.from?.id)) {
-      await ctx.reply(messages.unauthorized);
+      await replySafely(ctx, messages.unauthorized, { userId: ctx.from?.id });
       return;
     }
 
@@ -59,31 +62,31 @@ export function createBot(): Telegraf<Context> {
     }
 
     if (session.state === "waiting_title") {
-      await ctx.reply(messages.waitTitleText);
+      await replySafely(ctx, messages.waitTitleText, { userId });
       return;
     }
 
     if (session.state === "waiting_content") {
-      await ctx.reply(messages.waitContentText);
+      await replySafely(ctx, messages.waitContentText, { userId });
       return;
     }
 
     if (session.state === "waiting_image") {
-      await ctx.reply(messages.waitImagePhoto);
+      await replySafely(ctx, messages.waitImagePhoto, { userId });
       return;
     }
 
     if (session.state === "waiting_product_link") {
-      await ctx.reply(messages.waitProductLinkText);
+      await replySafely(ctx, messages.waitProductLinkText, { userId });
       return;
     }
 
     if (session.state === "waiting_keywords") {
-      await ctx.reply(messages.waitKeywordsText);
+      await replySafely(ctx, messages.waitKeywordsText, { userId });
       return;
     }
 
-    await ctx.reply(messages.genericStartFlow);
+    await replySafely(ctx, messages.genericStartFlow, { userId });
   });
 
   return bot;

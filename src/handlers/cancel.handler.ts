@@ -1,6 +1,7 @@
 import { Context } from "telegraf";
 import { messages } from "../bot/messages";
 import { resetSession } from "../bot/sessionStore";
+import { replySafely } from "../utils/telegram";
 
 export async function handleCancel(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
@@ -8,5 +9,5 @@ export async function handleCancel(ctx: Context): Promise<void> {
     resetSession(userId);
   }
 
-  await ctx.reply(messages.cancelCurrentAction);
+  await replySafely(ctx, messages.cancelCurrentAction, { userId });
 }

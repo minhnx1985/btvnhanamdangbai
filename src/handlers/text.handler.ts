@@ -7,6 +7,7 @@ import { sapoService } from "../services/sapo.service";
 import { LinkedProduct } from "../types/sapo";
 import { PostType } from "../types/session";
 import { logger } from "../utils/logger";
+import { replySafely } from "../utils/telegram";
 
 type TextContext = Context & {
   message: {
@@ -62,7 +63,7 @@ export async function submitDraftPost(
   userId: number,
   input: DraftSubmissionInput
 ): Promise<void> {
-  await ctx.reply(messages.submitting);
+  await replySafely(ctx, messages.submitting, { userId, postType: input.postType });
 
   const isAuthorPost = input.postType === "author";
   const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
@@ -105,12 +106,12 @@ export async function submitDraftPost(
       lines.push(`- Tag: ${input.tags}`);
     }
 
-    await ctx.reply(lines.join("\n"));
+    await replySafely(ctx, lines.join("\n"), { userId, postType: input.postType, articleId: result.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lỗi hệ thống, vui lòng thử lại";
     logger.error("create draft fail", { userId, reason: message, postType: input.postType });
     resetSession(userId);
-    await ctx.reply(`❌ Tạo bài nháp thất bại: ${message}`);
+    await replySafely(ctx, `❌ Tạo bài nháp thất bại: ${message}`, { userId, postType: input.postType });
   }
 }
 
@@ -119,7 +120,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
   const text = ctx.message.text?.trim();
 
   if (!userId || !text) {
-    await ctx.reply(messages.genericStartFlow);
+    await replySafely(ctx, messages.genericStartFlow);
     return;
   }
 
@@ -127,7 +128,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
 
   try {
     if (session.state === "idle") {
-      await ctx.reply(messages.genericStartFlow);
+      await replySafely(ctx, messages.genericStartFlow, { userId });
       return;
     }
 
@@ -137,7 +138,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
         postType: session.postType ?? "blog",
         title: text
       });
-      await ctx.reply(messages.askContent);
+      await replySafely(ctx, messages.askContent, { userId });
       return;
     }
 
@@ -150,19 +151,19 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
         title: session.title,
         content: nextContent
       });
-      await ctx.reply(messages.contentAppended);
+      await replySafely(ctx, messages.contentAppended, { userId });
       return;
     }
 
     if (session.state === "waiting_image") {
-      await ctx.reply(messages.waitImagePhoto);
+      await replySafely(ctx, messages.waitImagePhoto, { userId });
       return;
     }
 
     if (session.state === "waiting_product_link") {
       if (!session.title || !session.content || !session.imageBase64 || !session.imageMimeType) {
         resetSession(userId);
-        await ctx.reply("❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại");
+        await replySafely(ctx, "❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại", { userId });
         return;
       }
 
@@ -175,7 +176,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType
         });
-        await ctx.reply(messages.askKeywords);
+        await replySafely(ctx, messages.askKeywords, { userId });
         return;
       }
 
@@ -191,7 +192,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
           productTag: resolvedProducts.tag,
           linkedProducts: resolvedProducts.linkedProducts
         });
-        await ctx.reply(messages.askKeywords);
+        await replySafely(ctx, messages.askKeywords, { userId });
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Skip invalid product links";
@@ -204,7 +205,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType
         });
-        await ctx.reply(messages.askKeywords);
+        await replySafely(ctx, messages.askKeywords, { userId });
         return;
       }
     }
@@ -212,7 +213,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
     if (session.state === "waiting_keywords") {
       if (!session.title || !session.content || !session.imageBase64 || !session.imageMimeType) {
         resetSession(userId);
-        await ctx.reply("❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại");
+        await replySafely(ctx, "❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại", { userId });
         return;
       }
 
@@ -242,10 +243,10 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       return;
     }
 
-    await ctx.reply(messages.genericStartFlow);
+    await replySafely(ctx, messages.genericStartFlow, { userId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lỗi hệ thống, vui lòng thử lại";
     logger.error("text handler failed", { userId, reason: message });
-    await ctx.reply(`❌ Tạo bài nháp thất bại: ${message}`);
+    await replySafely(ctx, `❌ Tạo bài nháp thất bại: ${message}`, { userId });
   }
 }

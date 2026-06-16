@@ -4,6 +4,7 @@ import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { compressImageUnder1MB } from "../services/image.service";
 import { downloadTelegramPhoto } from "../services/telegram-file.service";
 import { logger } from "../utils/logger";
+import { replySafely } from "../utils/telegram";
 import { submitDraftPost } from "./text.handler";
 
 type PhotoContext = Context & {
@@ -15,45 +16,45 @@ type PhotoContext = Context & {
 export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
   const userId = ctx.from?.id;
   if (!userId) {
-    await ctx.reply(messages.genericStartFlow);
+    await replySafely(ctx, messages.genericStartFlow);
     return;
   }
 
   const session = getSession(userId);
 
   if (session.state === "idle") {
-    await ctx.reply(messages.genericStartFlow);
+    await replySafely(ctx, messages.genericStartFlow, { userId });
     return;
   }
 
   if (session.state === "waiting_title") {
-    await ctx.reply(messages.waitTitleText);
+    await replySafely(ctx, messages.waitTitleText, { userId });
     return;
   }
 
   if (session.state === "waiting_content" && !session.content) {
-    await ctx.reply(messages.waitContentText);
+    await replySafely(ctx, messages.waitContentText, { userId });
     return;
   }
 
   if (session.state === "waiting_product_link") {
-    await ctx.reply(messages.waitProductLinkText);
+    await replySafely(ctx, messages.waitProductLinkText, { userId });
     return;
   }
 
   if (session.state === "waiting_keywords") {
-    await ctx.reply(messages.waitKeywordsText);
+    await replySafely(ctx, messages.waitKeywordsText, { userId });
     return;
   }
 
   if (session.state !== "waiting_image" && session.state !== "waiting_content") {
-    await ctx.reply(messages.genericStartFlow);
+    await replySafely(ctx, messages.genericStartFlow, { userId });
     return;
   }
 
   if (!session.title || !session.content) {
     resetSession(userId);
-    await ctx.reply("❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại");
+    await replySafely(ctx, "❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại", { userId });
     return;
   }
 
@@ -87,11 +88,11 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
       imageMimeType: processedImage.mimeType
     });
 
-    await ctx.reply(messages.askProductLink);
+    await replySafely(ctx, messages.askProductLink, { userId, postType: "blog" });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Không thể xử lý ảnh dưới 1MB";
     logger.error("photo handler failed", { userId, reason, postType: session.postType ?? "blog" });
     resetSession(userId);
-    await ctx.reply(`❌ Tạo bài nháp thất bại: ${reason}`);
+    await replySafely(ctx, `❌ Tạo bài nháp thất bại: ${reason}`, { userId, postType: session.postType ?? "blog" });
   }
 }

@@ -1,6 +1,7 @@
 import { Context, MiddlewareFn } from "telegraf";
 import { messages } from "./messages";
 import { config } from "../config/env";
+import { replySafely } from "../utils/telegram";
 
 export function isAuthorizedUser(userId?: number): boolean {
   if (!userId) {
@@ -18,7 +19,7 @@ export function authorizedOnly(): MiddlewareFn<Context> {
   return async (ctx, next) => {
     const userId = ctx.from?.id;
     if (!isAuthorizedUser(userId)) {
-      await ctx.reply(messages.unauthorized);
+      await replySafely(ctx, messages.unauthorized, { userId });
       return;
     }
 
