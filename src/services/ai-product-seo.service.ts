@@ -1,4 +1,3 @@
-import { applyReadableSpacingToHtml } from "./content.service";
 import { shopApiService, ShopApiChatMessage } from "./shopapi.service";
 import { ProductSeoMarketingInput, ProductSeoMarketingResult } from "../types/product-seo.types";
 import { AppError } from "../utils/errors";
@@ -139,7 +138,7 @@ function normalizeAiResult(result: RawAiProductSeoResult, bookDNAConfidence: num
     "marketingBlocksHtml"
   );
   const finalBodyHtml = validateHtml(
-    applyReadableSpacingToHtml(sanitizeProductDescriptionHtml(readRequiredString(result.finalBodyHtml, "finalBodyHtml"))),
+    sanitizeProductDescriptionHtml(readRequiredString(result.finalBodyHtml, "finalBodyHtml")),
     "finalBodyHtml"
   );
   const telegramPreview = readRequiredString(result.telegramPreview, "telegramPreview");
