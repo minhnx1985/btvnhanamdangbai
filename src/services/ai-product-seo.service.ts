@@ -425,29 +425,58 @@ function buildFinalBodyHtml(product: NormalizedSapoProduct, introductionHtml: st
 function buildPublicationInfoHtml(product: NormalizedSapoProduct): string {
   const raw = isRecord(product.raw) ? product.raw : {};
   const fields: Array<[string, string | undefined]> = [
-    ["Tác giả", readProductMetadata(raw, ["author", "authors", "author_name", "tac_gia", "tacgia", "tác giả"])],
-    ["Dịch giả", readProductMetadata(raw, ["translator", "translators", "translated_by", "dich_gia", "dichgia", "dịch giả"])],
+    [
+      "Tác giả",
+      readProductMetadata(raw, ["author", "authors", "author_name", "tac_gia", "tacgia", "tác giả"], isHumanNameMetadata)
+    ],
+    [
+      "Dịch giả",
+      readProductMetadata(
+        raw,
+        ["translator", "translators", "translated_by", "dich_gia", "dichgia", "dịch giả", "người dịch", "nguoi_dich"],
+        isHumanNameMetadata
+      )
+    ],
     [
       "Nhà xuất bản",
       readProductMetadata(raw, [
         "publisher",
         "publishers",
+        "publisher_name",
         "publishing_house",
         "nxb",
         "nha_xuat_ban",
         "nhà xuất bản"
-      ])
+      ], isTextMetadata)
     ],
-    ["Số trang", readProductMetadata(raw, ["pages", "page_count", "number_of_pages", "so_trang", "số trang"])],
-    ["Kích thước", readProductMetadata(raw, ["book_size", "book_dimensions", "product_dimensions", "kich_thuoc", "kích thước"])]
+    [
+      "Số trang",
+      readProductMetadata(raw, ["pages", "page_count", "number_of_pages", "so_trang", "số trang", "trang"], isPageCountMetadata)
+    ],
+    [
+      "Kích thước",
+      readProductMetadata(
+        raw,
+        ["book_size", "book_dimensions", "product_dimensions", "kich_thuoc", "kích thước", "kho_sach", "khổ sách"],
+        isBookSizeMetadata
+      )
+    ]
   ].filter((field): field is [string, string] => typeof field[1] === "string" && field[1].trim().length > 0);
+
+  if (fields.length === 0) {
+    return "";
+  }
 
   const rows = fields.map(([label, value]) => `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</p>`);
   return ["<h2>Thông tin xuất bản</h2>", ...rows].join("\n");
 }
 
-function readProductMetadata(raw: Record<string, unknown>, keyAliases: string[]): string | undefined {
-  const direct = findMetadataValue(raw, keyAliases, 0);
+function readProductMetadata(
+  raw: Record<string, unknown>,
+  keyAliases: string[],
+  validator: (value: string) => boolean
+): string | undefined {
+  const direct = findMetadataValue(raw, keyAliases, validator, 0);
   if (direct) {
     return direct;
   }
@@ -455,14 +484,19 @@ function readProductMetadata(raw: Record<string, unknown>, keyAliases: string[])
   return undefined;
 }
 
-function findMetadataValue(value: unknown, keyAliases: string[], depth: number): string | undefined {
+function findMetadataValue(
+  value: unknown,
+  keyAliases: string[],
+  validator: (value: string) => boolean,
+  depth: number
+): string | undefined {
   if (depth > 5 || value == null) {
     return undefined;
   }
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findMetadataValue(item, keyAliases, depth + 1);
+      const found = findMetadataValue(item, keyAliases, validator, depth + 1);
       if (found) {
         return found;
       }
@@ -474,19 +508,49 @@ function findMetadataValue(value: unknown, keyAliases: string[], depth: number):
     return undefined;
   }
 
+  const labeledValue = readLabeledMetadataObject(value, keyAliases, validator);
+  if (labeledValue) {
+    return labeledValue;
+  }
+
   for (const [key, nestedValue] of Object.entries(value)) {
     if (isMetadataKeyMatch(key, keyAliases)) {
       const rendered = renderMetadataValue(nestedValue);
-      if (rendered) {
+      if (rendered && validator(rendered)) {
         return rendered;
       }
     }
   }
 
   for (const nestedValue of Object.values(value)) {
-    const found = findMetadataValue(nestedValue, keyAliases, depth + 1);
+    const found = findMetadataValue(nestedValue, keyAliases, validator, depth + 1);
     if (found) {
       return found;
+    }
+  }
+
+  return undefined;
+}
+
+function readLabeledMetadataObject(
+  value: Record<string, unknown>,
+  keyAliases: string[],
+  validator: (value: string) => boolean
+): string | undefined {
+  const label = firstRenderedMetadataValue(value, ["key", "name", "label", "title", "field", "attribute", "attribute_name", "code"]);
+  if (!label || !isMetadataKeyMatch(label, keyAliases)) {
+    return undefined;
+  }
+
+  const rendered = firstRenderedMetadataValue(value, ["value", "display_value", "content", "text"]);
+  return rendered && validator(rendered) ? rendered : undefined;
+}
+
+function firstRenderedMetadataValue(value: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const rendered = renderMetadataValue(value[key]);
+    if (rendered) {
+      return rendered;
     }
   }
 
@@ -496,6 +560,35 @@ function findMetadataValue(value: unknown, keyAliases: string[], depth: number):
 function isMetadataKeyMatch(key: string, aliases: string[]): boolean {
   const normalizedKey = normalizeForQualityCheck(key).replace(/[^a-z0-9]+/g, "");
   return aliases.some((alias) => normalizedKey === normalizeForQualityCheck(alias).replace(/[^a-z0-9]+/g, ""));
+}
+
+function isTextMetadata(value: string): boolean {
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 120 && !/^\d+$/.test(normalized);
+}
+
+function isHumanNameMetadata(value: string): boolean {
+  return isTextMetadata(value) && !/@|https?:\/\//i.test(value);
+}
+
+function isPageCountMetadata(value: string): boolean {
+  const normalized = value.trim();
+  const match = normalized.match(/\d{1,4}/);
+  if (!match) {
+    return false;
+  }
+
+  const numberValue = Number(match[0]);
+  return numberValue > 0 && numberValue <= 3000;
+}
+
+function isBookSizeMetadata(value: string): boolean {
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > 80 || /^\d{5,}$/.test(normalized)) {
+    return false;
+  }
+
+  return /\d+\s*(?:x|×)\s*\d+|\d+\s*(?:cm|mm)/i.test(normalized);
 }
 
 function renderMetadataValue(value: unknown): string | undefined {
