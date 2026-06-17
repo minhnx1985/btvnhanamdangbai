@@ -1,19 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { ProductSeoBookUnderstandingJob, ProductSeoPendingJob } from "../types/product-seo.types";
-
-type ProductSeoDetectedUrlJob = {
-  type: "product_seo_detected_url";
-  jobId: string;
-  userId: number;
-  alias: string;
-  createdAt: number;
-};
+import {
+  ProductSeoBookUnderstandingJob,
+  ProductSeoPendingJob,
+  ProductSeoPreparationJob
+} from "../types/product-seo.types";
 
 const PRODUCT_SEO_JOB_TTL_MS = 30 * 60 * 1000;
 const pendingUpdateJobs = new Map<string, ProductSeoPendingJob>();
 const bookUnderstandingJobs = new Map<string, ProductSeoBookUnderstandingJob>();
-const detectedUrlJobs = new Map<string, ProductSeoDetectedUrlJob>();
+const preparationJobs = new Map<string, ProductSeoPreparationJob>();
 const enrichmentWaitByUser = new Map<number, string>();
+const preparationWaitByUser = new Map<number, string>();
 
 function isExpired(createdAt: number): boolean {
   return Date.now() - createdAt > PRODUCT_SEO_JOB_TTL_MS;
@@ -26,9 +23,12 @@ function pruneExpiredJobs(): void {
     }
   }
 
-  for (const [jobId, job] of detectedUrlJobs.entries()) {
+  for (const [jobId, job] of preparationJobs.entries()) {
     if (isExpired(job.createdAt)) {
-      detectedUrlJobs.delete(jobId);
+      preparationJobs.delete(jobId);
+      if (preparationWaitByUser.get(job.userId) === jobId) {
+        preparationWaitByUser.delete(job.userId);
+      }
     }
   }
 
@@ -42,22 +42,22 @@ function pruneExpiredJobs(): void {
   }
 }
 
-export function saveDetectedProductUrlJob(input: { userId: number; alias: string }): ProductSeoDetectedUrlJob {
+export function saveDetectedProductUrlJob(input: { userId: number; alias: string }): ProductSeoPreparationJob {
   pruneExpiredJobs();
-  const job: ProductSeoDetectedUrlJob = {
-    type: "product_seo_detected_url",
+  const job: ProductSeoPreparationJob = {
+    type: "product_seo_preparation",
     jobId: randomUUID(),
     userId: input.userId,
     alias: input.alias,
     createdAt: Date.now()
   };
-  detectedUrlJobs.set(job.jobId, job);
+  preparationJobs.set(job.jobId, job);
   return job;
 }
 
-export function getDetectedProductUrlJob(jobId: string, userId: number): ProductSeoDetectedUrlJob | null {
+export function getDetectedProductUrlJob(jobId: string, userId: number): ProductSeoPreparationJob | null {
   pruneExpiredJobs();
-  const job = detectedUrlJobs.get(jobId);
+  const job = preparationJobs.get(jobId);
   if (!job || job.userId !== userId) {
     return null;
   }
@@ -66,7 +66,11 @@ export function getDetectedProductUrlJob(jobId: string, userId: number): Product
 }
 
 export function deleteDetectedProductUrlJob(jobId: string): void {
-  detectedUrlJobs.delete(jobId);
+  const job = preparationJobs.get(jobId);
+  preparationJobs.delete(jobId);
+  if (job && preparationWaitByUser.get(job.userId) === jobId) {
+    preparationWaitByUser.delete(job.userId);
+  }
 }
 
 export function saveProductSeoPendingJob(job: ProductSeoPendingJob): void {
@@ -114,6 +118,31 @@ export function deleteProductSeoBookUnderstandingJob(jobId: string): void {
 export function setProductSeoEnrichmentWait(userId: number, jobId: string): void {
   pruneExpiredJobs();
   enrichmentWaitByUser.set(userId, jobId);
+}
+
+export function setProductSeoPreparationWait(userId: number, jobId: string): void {
+  pruneExpiredJobs();
+  preparationWaitByUser.set(userId, jobId);
+}
+
+export function getProductSeoPreparationWait(userId: number): ProductSeoPreparationJob | null {
+  pruneExpiredJobs();
+  const jobId = preparationWaitByUser.get(userId);
+  if (!jobId) {
+    return null;
+  }
+
+  const job = preparationJobs.get(jobId);
+  if (!job || job.userId !== userId) {
+    preparationWaitByUser.delete(userId);
+    return null;
+  }
+
+  return job;
+}
+
+export function clearProductSeoPreparationWait(userId: number): void {
+  preparationWaitByUser.delete(userId);
 }
 
 export function getProductSeoEnrichmentWait(userId: number): ProductSeoBookUnderstandingJob | null {

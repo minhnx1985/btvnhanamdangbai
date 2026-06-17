@@ -92,7 +92,7 @@ type RawAiProductSeoResult = {
 export async function generateProductSeoMarketing(input: ProductSeoMarketingInput): Promise<ProductSeoMarketingResult> {
   ensureBookUnderstandingReady(input);
 
-  const result = await generateWriterJson([
+  const messages: ShopApiChatMessage[] = [
     {
       role: "system",
       content: [
@@ -248,9 +248,37 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
         bookDNA: input.bookDNA
       })
     }
-  ]);
+  ];
 
-  return normalizeAiResult(result, input);
+  const result = await generateWriterJson(messages);
+  try {
+    return normalizeAiResult(result, input);
+  } catch (error) {
+    if (!isRetryableWriterValidationError(error)) {
+      throw error;
+    }
+
+    const retryResult = await generateWriterJson([
+      ...messages,
+      {
+        role: "user",
+        content: [
+          "Output trước bị hệ thống từ chối sau sanitize/validation.",
+          `Lỗi: ${error instanceof Error ? error.message : String(error)}`,
+          "",
+          "Hãy viết lại JSON một lần nữa.",
+          "Bắt buộc sửa lỗi trên, bỏ hoàn toàn cụm bị cấm, không thêm CTA, không thêm section ngoài cấu trúc.",
+          "Giữ đúng hai block AI: h2 Giới thiệu sách và h2 Cuốn sách này dành cho ai.",
+          "Không tự viết Thông tin xuất bản.",
+          "",
+          "Output trước:",
+          JSON.stringify(result)
+        ].join("\n")
+      }
+    ]);
+
+    return normalizeAiResult(retryResult, input);
+  }
 }
 
 function ensureBookUnderstandingReady(input: ProductSeoMarketingInput): void {
@@ -283,6 +311,20 @@ async function generateWriterJson(messages: ShopApiChatMessage[]): Promise<RawAi
 
     throw error;
   }
+}
+
+function isRetryableWriterValidationError(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return false;
+  }
+
+  return [
+    "AI_PRODUCT_SEO_FORBIDDEN_FILLER",
+    "AI_PRODUCT_SEO_FORBIDDEN_STRUCTURE",
+    "AI_PRODUCT_SEO_FORBIDDEN_METADATA",
+    "AI_PRODUCT_SEO_INVALID_STRUCTURE",
+    "AI_PRODUCT_SEO_MISSING_FOREIGN_PRAISE"
+  ].includes(error.code);
 }
 
 function normalizeAiResult(result: RawAiProductSeoResult, input: ProductSeoMarketingInput): ProductSeoMarketingResult {
@@ -504,8 +546,12 @@ function validateHtml(
   }
 
   const normalizedText = normalizeForQualityCheck(plainText);
-  if (FORBIDDEN_NORMALIZED_PHRASES.some((phrase) => normalizedText.includes(phrase))) {
-    throw new AppError(`HTML sau sanitize con chua cum SEO/filler bi cam: ${fieldName}`, "AI_PRODUCT_SEO_FORBIDDEN_FILLER");
+  const forbiddenPhrase = findForbiddenNormalizedPhrase(normalizedText);
+  if (forbiddenPhrase) {
+    throw new AppError(
+      `HTML sau sanitize còn chứa cụm SEO/filler bị cấm "${forbiddenPhrase}": ${fieldName}`,
+      "AI_PRODUCT_SEO_FORBIDDEN_FILLER"
+    );
   }
 
   if (options.aiContent) {
@@ -529,6 +575,20 @@ function validateSingleHeading(html: string, normalizedHeading: string, fieldNam
   if (headings.length !== 1 || headings[0] !== normalizedHeading || /<h3>/i.test(html)) {
     throw new AppError(`AI sai cấu trúc heading bắt buộc: ${fieldName}`, "AI_PRODUCT_SEO_INVALID_STRUCTURE");
   }
+}
+
+function findForbiddenNormalizedPhrase(normalizedText: string): string | undefined {
+  return FORBIDDEN_NORMALIZED_PHRASES.find((phrase) => {
+    if (/^[a-z0-9]+$/.test(phrase) && phrase.length <= 4) {
+      return new RegExp(`(^|[^a-z0-9])${escapeRegExp(phrase)}($|[^a-z0-9])`).test(normalizedText);
+    }
+
+    return normalizedText.includes(phrase);
+  });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function validateForeignPraiseIncluded(html: string, foreignPraiseQuotes: string[]): void {

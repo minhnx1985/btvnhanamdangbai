@@ -103,6 +103,14 @@ export type ProductSeoPendingJob = {
   createdAt: number;
 };
 
+export type ProductSeoPreparationJob = {
+  type: "product_seo_preparation";
+  jobId: string;
+  userId: number;
+  alias: string;
+  createdAt: number;
+};
+
 export type ProductSeoHumanEnrichment = {
   dataType: string;
   summary: string;

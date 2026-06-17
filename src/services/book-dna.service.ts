@@ -17,6 +17,7 @@ type BookDNAInput = {
       alias?: string;
       summary?: string;
     }>;
+    humanEnrichmentText?: string;
   };
 };
 
@@ -36,6 +37,10 @@ type RawHumanBookEnrichment = {
 };
 
 export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
+  const preAnalysisHumanEnrichment = input.relatedData?.humanEnrichmentText
+    ? await prepareHumanEnrichmentSource(input.relatedData.humanEnrichmentText)
+    : undefined;
+
   logger.info("book_dna_started", {
     productId: input.product.id,
     alias: input.product.alias ?? input.product.handle
@@ -60,6 +65,13 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
         "- Positioning Statement: one exact sentence describing what this book is.",
         "- Selected Framework: the most suitable marketing structure, chosen naturally, not forced.",
         "- Foreign Praise Quotes: translated Vietnamese versions of supported praise from foreign newspapers, magazines, publishers, or reputable media sources.",
+        "",
+        "Pre-analysis human enrichment:",
+        "- The user may provide back cover text, reviews, editorial notes, publisher letters, articles, Wikipedia links, Nha Nam links, or foreign press praise before this first analysis.",
+        "- Use this human enrichment as source material inside the first Book DNA pass, so the bot does not need to analyze Book DNA twice.",
+        "- Detect what kind of source it is, extract useful editorial/marketing insight, and fold it into the required Book DNA fields.",
+        "- If it contains praise from foreign newspapers, magazines, publishers, or reputable media sources, translate every supported praise quote fully into Vietnamese and store it in foreignPraiseQuotes with source attribution.",
+        "- Do not invent praise, source names, reviews, awards, media coverage, plot details, or age claims.",
         "",
         "Rules:",
         "- Do not start from metadata. Metadata can support understanding, but it is not the angle.",
@@ -154,7 +166,8 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
           seoTitle: input.product.seoTitle ?? input.product.metaTitle,
           metaDescription: input.product.metaDescription ?? input.product.seoDescription
         },
-        relatedData: input.relatedData ?? {}
+        relatedData: input.relatedData ?? {},
+        preAnalysisHumanEnrichment
       })
     }
   ]);

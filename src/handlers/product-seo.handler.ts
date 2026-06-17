@@ -9,18 +9,21 @@ import { sapoProductService } from "../services/sapo-product.service";
 import {
   deleteDetectedProductUrlJob,
   clearProductSeoEnrichmentWait,
+  clearProductSeoPreparationWait,
   deleteProductSeoBookUnderstandingJob,
   deleteProductSeoPendingJob,
   getDetectedProductUrlJob,
   getProductSeoBookUnderstandingJob,
   getProductSeoEnrichmentWait,
+  getProductSeoPreparationWait,
   getProductSeoPendingJob,
   saveDetectedProductUrlJob,
   saveProductSeoBookUnderstandingJob,
+  setProductSeoPreparationWait,
   setProductSeoEnrichmentWait,
   saveProductSeoPendingJob
 } from "../services/product-seo-job-store.service";
-import { ProductSeoBookUnderstandingJob, ProductSeoPendingJob } from "../types/product-seo.types";
+import { ProductSeoBookUnderstandingJob, ProductSeoPendingJob, ProductSeoPreparationJob } from "../types/product-seo.types";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
@@ -51,6 +54,7 @@ const PRODUCT_EDIT_FORBIDDEN_MESSAGE =
   "Bạn không có quyền sửa sản phẩm Sapo. Chỉ Telegram ID 1623038607 được phép cập nhật sản phẩm; phần blog vẫn dùng bình thường.";
 
 const enrichmentInputBuffers = new Map<number, BufferedEnrichmentInput>();
+const preparationInputBuffers = new Map<number, BufferedEnrichmentInput>();
 
 function getUserId(ctx: Context): number | undefined {
   return ctx.from?.id;
@@ -198,6 +202,14 @@ function buildActionButtons(jobId: string): InlineKeyboardButton[][] {
   ];
 }
 
+function buildPreparationButtons(jobId: string): InlineKeyboardButton[][] {
+  return [
+    [{ text: "Phân tích luôn", callback_data: `seo_analyze:${jobId}` }],
+    [{ text: "Bổ sung tư liệu", callback_data: `seo_pre_enrich:${jobId}` }],
+    [{ text: "Hủy", callback_data: `seo_cancel_detect:${jobId}` }]
+  ];
+}
+
 function buildBookDnaButtons(jobId: string): InlineKeyboardButton[][] {
   return [
     [{ text: "Viết ngay", callback_data: `seo_write:${jobId}` }],
@@ -260,9 +272,37 @@ function buildBookDnaMessage(job: ProductSeoBookUnderstandingJob): string {
   return truncatePreview(lines.join("\n"));
 }
 
-async function analyzeProductByAlias(ctx: Context, userId: number, alias: string): Promise<void> {
+async function startProductSeoPreparation(ctx: Context, userId: number, alias: string): Promise<void> {
+  const job = saveDetectedProductUrlJob({ userId, alias });
+  logger.info("product_url_detected", { userId, jobId: job.jobId, alias });
+  await replyWithButtonsSafely(
+    ctx,
+    [
+      "Đã nhận URL sản phẩm Nhã Nam.",
+      "",
+      "Bạn có tư liệu bổ sung trước khi bot phân tích Book DNA không?",
+      "",
+      "Có thể gửi back cover, review, bài báo, link Wikipedia/Nhã Nam, thư giới thiệu sách, ghi chú BTV hoặc lời khen từ báo nước ngoài."
+    ].join("\n"),
+    buildPreparationButtons(job.jobId),
+    { userId, jobId: job.jobId, alias }
+  );
+}
+
+async function analyzeProductByAlias(
+  ctx: Context,
+  userId: number,
+  alias: string,
+  humanEnrichmentText?: string
+): Promise<void> {
   logger.info("product_alias_extracted", { userId, alias });
-  await replySafely(ctx, "Đang tìm sản phẩm và phân tích Book DNA...", { userId, alias });
+  await replySafely(
+    ctx,
+    humanEnrichmentText
+      ? "Đang tìm sản phẩm và phân tích Book DNA từ dữ liệu đã gom..."
+      : "Đang tìm sản phẩm và phân tích Book DNA...",
+    { userId, alias }
+  );
 
   const product = await sapoProductService.findProductByAlias(alias);
   if (!product || !product.id || !product.title) {
@@ -280,7 +320,8 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
       summaryText: stripHtml(product.summary || ""),
       tags: product.tags,
       categories: [],
-      sameAuthorProducts: []
+      sameAuthorProducts: [],
+      humanEnrichmentText
     }
   });
   logger.info("book_dna_completed", { userId, productId: product.id, alias, confidence: bookDNA.confidence });
@@ -304,7 +345,16 @@ async function analyzeProductByAlias(ctx: Context, userId: number, alias: string
     productTitle: product.title,
     bookDNA,
     audit,
-    enrichments: [],
+    enrichments: humanEnrichmentText
+      ? [
+          {
+            dataType: "pre-analysis material",
+            summary: "Đã dùng tư liệu bổ sung trước khi phân tích Book DNA.",
+            insights: [],
+            createdAt: Date.now()
+          }
+        ]
+      : [],
     createdAt: Date.now()
   };
 
@@ -410,7 +460,7 @@ export async function handleSeoCommand(ctx: Context): Promise<void> {
   }
 
   try {
-    await analyzeProductByAlias(ctx, userId, alias);
+    await startProductSeoPreparation(ctx, userId, alias);
   } catch (error) {
     const reason = formatFriendlyError(error);
     logger.error("product_seo_update_failed", { userId, alias, reason });
@@ -521,17 +571,7 @@ export async function handleDetectedProductUrl(ctx: TextContext): Promise<boolea
     return false;
   }
 
-  const job = saveDetectedProductUrlJob({ userId, alias });
-  logger.info("product_url_detected", { userId, jobId: job.jobId, alias });
-  await replyWithButtonsSafely(
-    ctx,
-    "Phát hiện URL sản phẩm Nhã Nam. Bạn muốn tối ưu SEO & marketing cho sản phẩm này không?",
-    [
-      [{ text: "Tối ưu SEO & marketing", callback_data: `seo_start:${job.jobId}` }],
-      [{ text: "Hủy", callback_data: `seo_cancel_detect:${job.jobId}` }]
-    ],
-    { userId, jobId: job.jobId, alias }
-  );
+  await startProductSeoPreparation(ctx, userId, alias);
 
   return true;
 }
@@ -544,6 +584,12 @@ export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<
     return false;
   }
 
+  const preparationJob = getProductSeoPreparationWait(userId);
+  if (preparationJob) {
+    bufferProductSeoPreparationInput(ctx, userId, preparationJob, text);
+    return true;
+  }
+
   const job = getProductSeoEnrichmentWait(userId);
   if (!job) {
     return false;
@@ -551,6 +597,66 @@ export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<
 
   bufferProductSeoEnrichmentInput(ctx, userId, job, text);
   return true;
+}
+
+function bufferProductSeoPreparationInput(
+  ctx: TextContext,
+  userId: number,
+  job: ProductSeoPreparationJob,
+  text: string
+): void {
+  const existing = preparationInputBuffers.get(userId);
+  if (existing) {
+    clearTimeout(existing.timer);
+  }
+
+  const parts = existing && existing.jobId === job.jobId ? [...existing.parts, text] : [text];
+  const timer = setTimeout(() => {
+    void processBufferedProductSeoPreparation(userId);
+  }, ENRICHMENT_INPUT_DEBOUNCE_MS);
+
+  preparationInputBuffers.set(userId, {
+    ctx,
+    jobId: job.jobId,
+    parts,
+    timer
+  });
+
+  logger.info("product_seo_preparation_input_buffered", {
+    userId,
+    jobId: job.jobId,
+    alias: job.alias,
+    parts: parts.length
+  });
+}
+
+async function processBufferedProductSeoPreparation(userId: number): Promise<void> {
+  const buffered = preparationInputBuffers.get(userId);
+  if (!buffered) {
+    return;
+  }
+
+  preparationInputBuffers.delete(userId);
+  const job = getProductSeoPreparationWait(userId);
+  if (!job || job.jobId !== buffered.jobId) {
+    return;
+  }
+
+  const combinedText = buffered.parts.join("\n\n").trim();
+  if (!combinedText) {
+    return;
+  }
+
+  clearProductSeoPreparationWait(userId);
+  deleteDetectedProductUrlJob(job.jobId);
+
+  try {
+    await analyzeProductByAlias(buffered.ctx, userId, job.alias, combinedText);
+  } catch (error) {
+    const reason = formatFriendlyError(error);
+    logger.error("product_seo_update_failed", { userId, jobId: job.jobId, alias: job.alias, reason });
+    await replySafely(buffered.ctx, `Không tối ưu được sản phẩm: ${reason}`, { userId, jobId: job.jobId, alias: job.alias });
+  }
 }
 
 function bufferProductSeoEnrichmentInput(
@@ -690,7 +796,7 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
     return;
   }
 
-  if (action === "seo_start") {
+  if (action === "seo_start" || action === "seo_analyze") {
     const detectedJob = getDetectedProductUrlJob(jobId, userId);
     if (!detectedJob) {
       await replySafely(ctx, "Job xác nhận đã hết hạn hoặc không thuộc user này.", { userId, jobId });
@@ -705,6 +811,28 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
       logger.error("product_seo_update_failed", { userId, jobId, alias: detectedJob.alias, reason });
       await replySafely(ctx, `Không tối ưu được sản phẩm: ${reason}`, { userId, jobId });
     }
+    return;
+  }
+
+  if (action === "seo_pre_enrich") {
+    const preparationJob = getDetectedProductUrlJob(jobId, userId);
+    if (!preparationJob) {
+      await replySafely(ctx, "Job xác nhận đã hết hạn hoặc không thuộc user này.", { userId, jobId });
+      return;
+    }
+
+    setProductSeoPreparationWait(userId, jobId);
+    await replySafely(
+      ctx,
+      [
+        "Bạn gửi tư liệu bổ sung cho cuốn sách này nhé.",
+        "",
+        "Có thể gửi nhiều tin nhắn liên tiếp; bot sẽ nối lại rồi phân tích Book DNA một lần.",
+        "",
+        "Nhận text, link website, link bài báo, link Wikipedia/Nhã Nam, back cover, review, thư giới thiệu sách, ghi chú BTV hoặc praise báo nước ngoài."
+      ].join("\n"),
+      { userId, jobId, alias: preparationJob.alias }
+    );
     return;
   }
 
