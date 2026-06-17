@@ -3,27 +3,30 @@ import { Context } from "telegraf";
 import { canEditProducts } from "../bot/guards";
 import { analyzeBookDNA, enrichBookDNA } from "../services/book-dna.service";
 import { auditProductSeoMarketing, stripHtml } from "../services/product-audit.service";
-import { generateProductSeoMarketing } from "../services/ai-product-seo.service";
+import { formatExistingProductDescription, generateProductSeoMarketing } from "../services/ai-product-seo.service";
 import { extractNhanamProductAlias } from "../services/product-url.service";
 import { sapoProductService } from "../services/sapo-product.service";
 import {
   deleteDetectedProductUrlJob,
   clearProductSeoEnrichmentWait,
+  clearProductSeoFormatDescriptionWait,
   clearProductSeoPreparationWait,
   deleteProductSeoBookUnderstandingJob,
   deleteProductSeoPendingJob,
   getDetectedProductUrlJob,
   getProductSeoBookUnderstandingJob,
   getProductSeoEnrichmentWait,
+  getProductSeoFormatDescriptionWait,
   getProductSeoPreparationWait,
   getProductSeoPendingJob,
   saveDetectedProductUrlJob,
   saveProductSeoBookUnderstandingJob,
+  setProductSeoFormatDescriptionWait,
   setProductSeoPreparationWait,
   setProductSeoEnrichmentWait,
   saveProductSeoPendingJob
 } from "../services/product-seo-job-store.service";
-import { ProductSeoBookUnderstandingJob, ProductSeoPendingJob, ProductSeoPreparationJob } from "../types/product-seo.types";
+import { BookDNA, ProductSeoBookUnderstandingJob, ProductSeoPendingJob, ProductSeoPreparationJob } from "../types/product-seo.types";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
@@ -55,6 +58,7 @@ const PRODUCT_EDIT_FORBIDDEN_MESSAGE =
 
 const enrichmentInputBuffers = new Map<number, BufferedEnrichmentInput>();
 const preparationInputBuffers = new Map<number, BufferedEnrichmentInput>();
+const formatDescriptionInputBuffers = new Map<number, BufferedEnrichmentInput>();
 
 function getUserId(ctx: Context): number | undefined {
   return ctx.from?.id;
@@ -210,7 +214,7 @@ function buildActionButtons(jobId: string): InlineKeyboardButton[][] {
 
 function buildPreparationButtons(jobId: string): InlineKeyboardButton[][] {
   return [
-    [{ text: "Tự viết lại mô tả", callback_data: `seo_auto_write:${jobId}` }],
+    [{ text: "Nhập mô tả mới", callback_data: `seo_auto_write:${jobId}` }],
     [{ text: "Phân tích luôn", callback_data: `seo_analyze:${jobId}` }],
     [{ text: "Bổ sung tư liệu", callback_data: `seo_pre_enrich:${jobId}` }],
     [{ text: "Hủy", callback_data: `seo_cancel_detect:${jobId}` }]
@@ -289,7 +293,7 @@ async function startProductSeoPreparation(ctx: Context, userId: number, alias: s
       "",
       "Bạn có tư liệu bổ sung trước khi bot phân tích Book DNA không?",
       "",
-      "Nếu muốn đi nhanh, chọn Tự viết lại mô tả để bot tự tạo preview theo cấu trúc chuẩn.",
+      "Nếu bạn đã có mô tả mới, chọn Nhập mô tả mới. Bot sẽ chỉ format text bạn gửi vào cấu trúc chuẩn, không viết lại câu chữ.",
       "",
       "Có thể gửi back cover, review, bài báo, link Wikipedia/Nhã Nam, thư giới thiệu sách, ghi chú BTV hoặc lời khen từ báo nước ngoài."
     ].join("\n"),
@@ -377,53 +381,46 @@ async function analyzeProductByAlias(
   });
 }
 
-async function autoWriteProductDescriptionByAlias(ctx: Context, userId: number, alias: string): Promise<void> {
-  logger.info("product_alias_extracted", { userId, alias, mode: "auto_write" });
-  await replySafely(ctx, "Đang tự phân tích và viết lại mô tả sản phẩm...", { userId, alias });
+async function formatSubmittedProductDescriptionByAlias(
+  ctx: Context,
+  userId: number,
+  alias: string,
+  submittedDescriptionText: string
+): Promise<void> {
+  logger.info("product_alias_extracted", { userId, alias, mode: "format_submitted_description" });
+  await replySafely(ctx, "Đang format mô tả bạn vừa gửi. Bot sẽ không sửa câu chữ.", { userId, alias });
 
   const product = await sapoProductService.findProductByAlias(alias);
   if (!product || !product.id || !product.title) {
-    logger.warn("sapo_product_not_found", { userId, alias, mode: "auto_write" });
+    logger.warn("sapo_product_not_found", { userId, alias, mode: "format_submitted_description" });
     await replySafely(ctx, "Không tìm thấy sản phẩm tương ứng trong Sapo.", { userId, alias });
     return;
   }
-  logger.info("sapo_product_found", { userId, productId: product.id, alias, title: product.title, mode: "auto_write" });
-
-  logger.info("book_dna_started", { userId, productId: product.id, alias, mode: "auto_write" });
-  const bookDNA = await analyzeBookDNA({
-    product,
-    relatedData: {
-      currentContentText: stripHtml(product.content || ""),
-      summaryText: stripHtml(product.summary || ""),
-      tags: product.tags,
-      categories: [],
-      sameAuthorProducts: []
-    }
+  logger.info("sapo_product_found", {
+    userId,
+    productId: product.id,
+    alias,
+    title: product.title,
+    mode: "format_submitted_description"
   });
-  logger.info("book_dna_completed", { userId, productId: product.id, alias, confidence: bookDNA.confidence, mode: "auto_write" });
 
-  const audit = auditProductSeoMarketing(product, bookDNA);
+  const bookDNA = createFormatOnlyBookDNA(product.title);
+  const audit = auditProductSeoMarketing(product);
   logger.info("product_audit_completed", {
     userId,
     productId: product.id,
     alias,
     seoScore: audit.currentSeoScore,
     marketingScore: audit.currentMarketingScore,
-    mode: "auto_write"
+    mode: "format_submitted_description"
   });
 
-  const aiResult = await generateProductSeoMarketing({
-    product,
-    audit,
-    bookDNA
-  });
-  logger.info("ai_product_seo_generated", {
+  const formattedResult = formatExistingProductDescription(product, submittedDescriptionText);
+  logger.info("product_description_formatted", {
     userId,
     productId: product.id,
     alias,
-    improvedSeoScore: aiResult.improvedSeoScore,
-    improvedMarketingScore: aiResult.improvedMarketingScore,
-    mode: "auto_write"
+    mode: "format_submitted_description"
   });
 
   const updateJob: ProductSeoPendingJob = {
@@ -434,18 +431,18 @@ async function autoWriteProductDescriptionByAlias(ctx: Context, userId: number, 
     productAlias: alias,
     productTitle: product.title,
     product,
-    seoTitle: aiResult.seoTitle,
-    metaDescription: aiResult.metaDescription,
-    finalBodyHtml: aiResult.finalBodyHtml,
+    seoTitle: formattedResult.seoTitle,
+    metaDescription: formattedResult.metaDescription,
+    finalBodyHtml: formattedResult.finalBodyHtml,
     bookDNA,
     audit: {
       currentSeoScore: audit.currentSeoScore,
       currentMarketingScore: audit.currentMarketingScore,
-      improvedSeoScore: aiResult.improvedSeoScore,
-      improvedMarketingScore: aiResult.improvedMarketingScore,
+      improvedSeoScore: formattedResult.improvedSeoScore,
+      improvedMarketingScore: formattedResult.improvedMarketingScore,
       issues: audit.issues,
       opportunities: audit.opportunities,
-      warnings: aiResult.warnings
+      warnings: formattedResult.warnings
     },
     createdAt: Date.now()
   };
@@ -456,7 +453,7 @@ async function autoWriteProductDescriptionByAlias(ctx: Context, userId: number, 
     jobId: updateJob.jobId,
     productId: updateJob.productId,
     alias: updateJob.productAlias,
-    mode: "auto_write"
+    mode: "format_submitted_description"
   });
   await replyWithButtonsSafely(ctx, buildPreviewMessage(updateJob), buildActionButtons(updateJob.jobId), {
     userId,
@@ -464,6 +461,37 @@ async function autoWriteProductDescriptionByAlias(ctx: Context, userId: number, 
     productId: updateJob.productId,
     alias: updateJob.productAlias
   });
+}
+
+function createFormatOnlyBookDNA(title: string): BookDNA {
+  return {
+    bookType: "Format mô tả người dùng nhập",
+    genreOrCategory: "",
+    readerDNA: "Không phân tích bằng AI trong chế độ format-only.",
+    buyerDNA: "Không phân tích bằng AI trong chế độ format-only.",
+    readingExperience: "Không phân tích bằng AI trong chế độ format-only.",
+    corePromise: "Giữ nguyên text hiện có của người dùng.",
+    competitiveAdvantage: "Chỉ chuẩn hóa cấu trúc HTML, không sửa câu chữ.",
+    positioningStatement: `Format mô tả người dùng nhập cho ${title}.`,
+    selectedFramework: "Format-only",
+    corePremise: "",
+    coreAppeal: "Giữ nguyên nội dung hiện có.",
+    emotionalPromise: "",
+    intellectualPromise: "",
+    targetReaders: [],
+    buyingReasons: [],
+    sellingPoints: [],
+    authorLeverage: "",
+    seriesOrBrandLeverage: "",
+    comparableTitlesOrSignals: [],
+    foreignPraiseQuotes: [],
+    toneOfVoice: "",
+    marketingAngle: "Không viết mới.",
+    seoKeywords: [],
+    forbiddenClaims: [],
+    missingData: [],
+    confidence: 0
+  };
 }
 
 async function generateWritingPreviewFromBookJob(
@@ -683,6 +711,12 @@ export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<
     return false;
   }
 
+  const formatDescriptionJob = getProductSeoFormatDescriptionWait(userId);
+  if (formatDescriptionJob) {
+    bufferProductSeoFormatDescriptionInput(ctx, userId, formatDescriptionJob, text);
+    return true;
+  }
+
   const preparationJob = getProductSeoPreparationWait(userId);
   if (preparationJob) {
     bufferProductSeoPreparationInput(ctx, userId, preparationJob, text);
@@ -696,6 +730,72 @@ export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<
 
   bufferProductSeoEnrichmentInput(ctx, userId, job, text);
   return true;
+}
+
+function bufferProductSeoFormatDescriptionInput(
+  ctx: TextContext,
+  userId: number,
+  job: ProductSeoPreparationJob,
+  text: string
+): void {
+  const existing = formatDescriptionInputBuffers.get(userId);
+  if (existing) {
+    clearTimeout(existing.timer);
+  }
+
+  const parts = existing && existing.jobId === job.jobId ? [...existing.parts, text] : [text];
+  const timer = setTimeout(() => {
+    void processBufferedProductSeoFormatDescription(userId);
+  }, ENRICHMENT_INPUT_DEBOUNCE_MS);
+
+  formatDescriptionInputBuffers.set(userId, {
+    ctx,
+    jobId: job.jobId,
+    parts,
+    timer
+  });
+
+  logger.info("product_seo_format_description_input_buffered", {
+    userId,
+    jobId: job.jobId,
+    alias: job.alias,
+    parts: parts.length
+  });
+}
+
+async function processBufferedProductSeoFormatDescription(userId: number): Promise<void> {
+  const buffered = formatDescriptionInputBuffers.get(userId);
+  if (!buffered) {
+    return;
+  }
+
+  formatDescriptionInputBuffers.delete(userId);
+  const job = getProductSeoFormatDescriptionWait(userId);
+  if (!job || job.jobId !== buffered.jobId) {
+    return;
+  }
+
+  const combinedText = buffered.parts.join("\n\n").trim();
+  if (!combinedText) {
+    return;
+  }
+
+  clearProductSeoFormatDescriptionWait(userId);
+  deleteDetectedProductUrlJob(job.jobId);
+
+  try {
+    await formatSubmittedProductDescriptionByAlias(buffered.ctx, userId, job.alias, combinedText);
+  } catch (error) {
+    const reason = formatFriendlyError(error);
+    logger.error("product_seo_update_failed", {
+      userId,
+      jobId: job.jobId,
+      alias: job.alias,
+      reason,
+      mode: "format_submitted_description"
+    });
+    await replySafely(buffered.ctx, `Không format được mô tả mới: ${reason}`, { userId, jobId: job.jobId, alias: job.alias });
+  }
 }
 
 function bufferProductSeoPreparationInput(
@@ -920,14 +1020,23 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
       return;
     }
 
-    deleteDetectedProductUrlJob(jobId);
-    try {
-      await autoWriteProductDescriptionByAlias(ctx, userId, detectedJob.alias);
-    } catch (error) {
-      const reason = formatFriendlyError(error);
-      logger.error("product_seo_update_failed", { userId, jobId, alias: detectedJob.alias, reason, mode: "auto_write" });
-      await replySafely(ctx, `Không tự viết lại được mô tả sản phẩm: ${reason}`, { userId, jobId });
-    }
+    setProductSeoFormatDescriptionWait(userId, jobId);
+    await replySafely(
+      ctx,
+      [
+        "Bạn gửi mô tả mới cho sản phẩm này nhé.",
+        "",
+        "Có thể gửi nhiều tin nhắn liên tiếp; bot sẽ nối lại rồi phản hồi một lần.",
+        "",
+        "Bot chỉ format text bạn gửi vào cấu trúc:",
+        "- Giới thiệu sách",
+        "- Cuốn sách này dành cho ai, nếu trong text có phần này",
+        "- Thông tin xuất bản, lấy từ metadata Sapo",
+        "",
+        "Bot không viết lại, không thêm ý và không sửa câu chữ của bạn."
+      ].join("\n"),
+      { userId, jobId, alias: detectedJob.alias }
+    );
     return;
   }
 

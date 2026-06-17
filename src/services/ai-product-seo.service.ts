@@ -296,6 +296,54 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
   }
 }
 
+export function formatExistingProductDescription(product: NormalizedSapoProduct, sourceText?: string): ProductSeoMarketingResult {
+  const hasSubmittedText = typeof sourceText === "string" && sourceText.trim().length > 0;
+  const sourceHtml = sanitizeProductDescriptionHtml(hasSubmittedText ? sourceText ?? "" : product.content || product.summary || "");
+  const blocks = htmlToTextBlocks(sourceHtml);
+  if (blocks.length === 0) {
+    throw new AppError(
+      hasSubmittedText
+        ? "Mô tả bạn gửi chưa có đủ nội dung để format."
+        : "Sản phẩm chưa có mô tả hiện có đủ nội dung để format.",
+      "PRODUCT_DESCRIPTION_SOURCE_EMPTY"
+    );
+  }
+
+  const sections = splitExistingDescriptionSections(blocks);
+  const productDescriptionHtml = buildTextOnlySectionHtml("Giới thiệu sách", sections.introduction);
+  const marketingBlocksHtml =
+    sections.audience.length > 0 ? buildTextOnlySectionHtml("Cuốn sách này dành cho ai", sections.audience) : "";
+  const finalBodyHtml = validateHtml(
+    buildFinalBodyHtml(product, productDescriptionHtml, marketingBlocksHtml),
+    "finalBodyHtml",
+    { checkForbiddenFiller: false }
+  );
+  const plainText = stripHtml(finalBodyHtml);
+
+  return {
+    seoTitle: product.title,
+    metaDescription: plainText.slice(0, 160),
+    productDescriptionHtml,
+    marketingBlocksHtml,
+    finalBodyHtml,
+    telegramPreview: plainText.slice(0, 1200),
+    improvedSeoScore: 0,
+    improvedMarketingScore: 0,
+    warnings: [
+      hasSubmittedText
+        ? "Format-only: bot chỉ định dạng mô tả người dùng nhập, không sửa câu chữ bằng AI."
+        : "Format-only: bot chỉ định dạng lại mô tả hiện có, không sửa câu chữ bằng AI.",
+      ...(sections.audience.length === 0
+        ? [
+            hasSubmittedText
+              ? "Không thấy section 'Cuốn sách này dành cho ai' trong mô tả bạn gửi nên bot không tự tạo thêm nội dung này."
+              : "Không thấy section 'Cuốn sách này dành cho ai' trong mô tả hiện có nên bot không tự tạo thêm nội dung này."
+          ]
+        : [])
+    ]
+  };
+}
+
 function ensureBookUnderstandingReady(input: ProductSeoMarketingInput): void {
   const requiredFields = [
     ["readerDNA", input.bookDNA.readerDNA],
@@ -446,6 +494,65 @@ function buildFinalBodyHtml(product: NormalizedSapoProduct, introductionHtml: st
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function htmlToTextBlocks(html: string): string[] {
+  return decodeBasicHtmlEntities(
+    html
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(?:p|li|h2|h3|ul)>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  )
+    .split(/\n+/)
+    .map((block) => block.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function splitExistingDescriptionSections(blocks: string[]): { introduction: string[]; audience: string[] } {
+  const audienceHeadingIndex = blocks.findIndex((block) => {
+    const normalized = normalizeForQualityCheck(block);
+    return normalized === "cuon sach nay danh cho ai" || normalized.includes("danh cho ai");
+  });
+  const publicationHeadingIndex = blocks.findIndex((block) => normalizeForQualityCheck(block).includes("thong tin xuat ban"));
+  const endIndex = publicationHeadingIndex >= 0 ? publicationHeadingIndex : blocks.length;
+
+  if (audienceHeadingIndex >= 0 && audienceHeadingIndex < endIndex) {
+    return {
+      introduction: removeKnownSectionHeadings(blocks.slice(0, audienceHeadingIndex)),
+      audience: removeKnownSectionHeadings(blocks.slice(audienceHeadingIndex + 1, endIndex))
+    };
+  }
+
+  return {
+    introduction: removeKnownSectionHeadings(blocks.slice(0, endIndex)),
+    audience: []
+  };
+}
+
+function removeKnownSectionHeadings(blocks: string[]): string[] {
+  return blocks.filter((block) => {
+    const normalized = normalizeForQualityCheck(block);
+    return (
+      normalized !== "gioi thieu sach" &&
+      normalized !== "cuon sach nay danh cho ai" &&
+      !normalized.includes("thong tin xuat ban")
+    );
+  });
+}
+
+function buildTextOnlySectionHtml(heading: string, blocks: string[]): string {
+  const body = blocks.map((block) => `<p>${escapeHtml(block)}</p>`).join("\n");
+  return [`<h2>${heading}</h2>`, body].filter(Boolean).join("\n");
+}
+
+function decodeBasicHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
 }
 
 function buildPublicationInfoHtml(product: NormalizedSapoProduct): string {
