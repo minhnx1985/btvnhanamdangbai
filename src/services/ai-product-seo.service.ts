@@ -310,9 +310,9 @@ export function formatExistingProductDescription(product: NormalizedSapoProduct,
   }
 
   const sections = splitExistingDescriptionSections(blocks);
-  const productDescriptionHtml = buildTextOnlySectionHtml("Giới thiệu sách", sections.introduction);
+  const productDescriptionHtml = buildTextOnlySectionHtml("Giới thiệu sách", sections.introduction, product.title);
   const marketingBlocksHtml =
-    sections.audience.length > 0 ? buildTextOnlySectionHtml("Cuốn sách này dành cho ai", sections.audience) : "";
+    sections.audience.length > 0 ? buildAudienceSectionHtml("Cuốn sách này dành cho ai", sections.audience, product.title) : "";
   const finalBodyHtml = validateHtml(
     buildFinalBodyHtml(product, productDescriptionHtml, marketingBlocksHtml),
     "finalBodyHtml",
@@ -540,9 +540,66 @@ function removeKnownSectionHeadings(blocks: string[]): string[] {
   });
 }
 
-function buildTextOnlySectionHtml(heading: string, blocks: string[]): string {
-  const body = blocks.map((block) => `<p>${escapeHtml(block)}</p>`).join("\n");
+function buildTextOnlySectionHtml(heading: string, blocks: string[], productTitle?: string): string {
+  const body = blocks.map((block) => `<p>${formatTextWithBookTitleStrong(block, productTitle)}</p>`).join("\n");
   return [`<h2>${heading}</h2>`, body].filter(Boolean).join("\n");
+}
+
+function buildAudienceSectionHtml(heading: string, blocks: string[], productTitle?: string): string {
+  const items = blocks
+    .flatMap((block) => splitAudienceBlock(block))
+    .map((block) => stripListMarker(block))
+    .filter(Boolean);
+
+  if (items.length === 0) {
+    return "";
+  }
+
+  const body = items.map((item) => `<li>${formatTextWithBookTitleStrong(item, productTitle)}</li>`).join("\n");
+  return [`<h2>${heading}</h2>`, "<ul>", body, "</ul>"].join("\n");
+}
+
+function splitAudienceBlock(block: string): string[] {
+  const normalized = block.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const inlineBulletParts = normalized
+    .split(/\s+(?=(?:[-*•–]|[0-9]{1,2}[.)])\s+)/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return inlineBulletParts.length > 1 ? inlineBulletParts : [normalized];
+}
+
+function stripListMarker(block: string): string {
+  return block.replace(/^\s*(?:[-*•–]|\d{1,2}[.)])\s+/, "").trim();
+}
+
+function formatTextWithBookTitleStrong(text: string, productTitle?: string): string {
+  const title = typeof productTitle === "string" ? productTitle.trim() : "";
+  if (!title) {
+    return escapeHtml(text);
+  }
+
+  const titlePattern = new RegExp(escapeRegExp(title), "gi");
+  let rendered = "";
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = titlePattern.exec(text)) !== null) {
+    rendered += escapeHtml(text.slice(lastIndex, match.index));
+    rendered += `<strong>${escapeHtml(match[0])}</strong>`;
+    lastIndex = match.index + match[0].length;
+
+    if (match[0].length === 0) {
+      titlePattern.lastIndex += 1;
+    }
+  }
+
+  rendered += escapeHtml(text.slice(lastIndex));
+  return rendered;
 }
 
 function decodeBasicHtmlEntities(value: string): string {
