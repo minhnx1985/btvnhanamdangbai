@@ -138,6 +138,7 @@ function formatList(items: string[]): string {
 }
 
 function buildPreviewMessage(job: ProductSeoPendingJob): string {
+  const hasForbiddenDraftWarning = job.audit.warnings.some((warning) => /cụm bị cấm|filler|cụm sáo/i.test(warning));
   const preview = [
     "Đã phân tích sản phẩm:",
     "",
@@ -190,11 +191,16 @@ function buildPreviewMessage(job: ProductSeoPendingJob): string {
   }
 
   preview.push("", "Bạn muốn cập nhật phần nào?");
+  if (hasForbiddenDraftWarning) {
+    preview.push("", "Bản nháp có cảnh báo cụm bị cấm. Bạn có thể dùng bản này, viết lại hoặc hủy.");
+  }
+
   return truncatePreview(preview.join("\n"));
 }
 
 function buildActionButtons(jobId: string): InlineKeyboardButton[][] {
   return [
+    [{ text: "Viết lại", callback_data: `seo_rewrite:${jobId}` }],
     [{ text: "Cập nhật mô tả", callback_data: `seo_desc:${jobId}` }],
     [{ text: "Cập nhật SEO", callback_data: `seo_meta:${jobId}` }],
     [{ text: "Cập nhật tất cả", callback_data: `seo_all:${jobId}` }],
@@ -411,6 +417,7 @@ async function generateWritingPreviewFromBookJob(
     productId: bookJob.productId,
     productAlias: bookJob.productAlias,
     productTitle: bookJob.productTitle,
+    product: bookJob.product,
     seoTitle: aiResult.seoTitle,
     metaDescription: aiResult.metaDescription,
     finalBodyHtml: aiResult.finalBodyHtml,
@@ -917,6 +924,62 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
       deleteProductSeoPendingJob(jobId);
       logger.info("product_seo_cancelled", { userId, jobId, productId: job.productId, alias: job.productAlias });
       await replySafely(ctx, "Đã hủy. Chưa có thay đổi nào trên Sapo.", { userId, jobId });
+      return;
+    }
+
+    if (action === "seo_rewrite") {
+      if (!job.product) {
+        await replySafely(ctx, "Job cũ thiếu dữ liệu sản phẩm để viết lại. Vui lòng chạy /seo lại.", { userId, jobId });
+        return;
+      }
+
+      await replySafely(ctx, "Đang viết lại bản nháp mô tả sản phẩm...", {
+        userId,
+        jobId,
+        productId: job.productId,
+        alias: job.productAlias
+      });
+
+      const audit = auditProductSeoMarketing(job.product, job.bookDNA);
+      const aiResult = await generateProductSeoMarketing({
+        product: job.product,
+        audit,
+        bookDNA: job.bookDNA
+      });
+
+      const rewrittenJob: ProductSeoPendingJob = {
+        ...job,
+        seoTitle: aiResult.seoTitle,
+        metaDescription: aiResult.metaDescription,
+        finalBodyHtml: aiResult.finalBodyHtml,
+        audit: {
+          currentSeoScore: audit.currentSeoScore,
+          currentMarketingScore: audit.currentMarketingScore,
+          improvedSeoScore: aiResult.improvedSeoScore,
+          improvedMarketingScore: aiResult.improvedMarketingScore,
+          issues: audit.issues,
+          opportunities: audit.opportunities,
+          warnings: aiResult.warnings
+        },
+        createdAt: Date.now()
+      };
+
+      saveProductSeoPendingJob(rewrittenJob);
+      logger.info("ai_product_seo_generated", {
+        userId,
+        jobId,
+        productId: job.productId,
+        alias: job.productAlias,
+        rewritten: true,
+        improvedSeoScore: aiResult.improvedSeoScore,
+        improvedMarketingScore: aiResult.improvedMarketingScore
+      });
+      await replyWithButtonsSafely(ctx, buildPreviewMessage(rewrittenJob), buildActionButtons(rewrittenJob.jobId), {
+        userId,
+        jobId,
+        productId: job.productId,
+        alias: job.productAlias
+      });
       return;
     }
 

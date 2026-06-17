@@ -87,6 +87,7 @@ export type ProductSeoPendingJob = {
   productId: string | number;
   productAlias: string;
   productTitle: string;
+  product: NormalizedSapoProduct;
   seoTitle: string;
   metaDescription: string;
   finalBodyHtml: string;

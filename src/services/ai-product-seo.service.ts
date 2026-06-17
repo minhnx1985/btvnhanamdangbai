@@ -328,24 +328,39 @@ function isRetryableWriterValidationError(error: unknown): boolean {
 }
 
 function normalizeAiResult(result: RawAiProductSeoResult, input: ProductSeoMarketingInput): ProductSeoMarketingResult {
+  const validationWarnings: string[] = [];
   const seoTitle = readRequiredString(result.seoTitle, "seoTitle").slice(0, 70);
   const metaDescription = readRequiredString(result.metaDescription, "metaDescription").slice(0, 170);
-  const productDescriptionHtml = validateHtml(
+  let productDescriptionHtml = validateHtml(
     sanitizeProductDescriptionHtml(readRequiredString(result.productDescriptionHtml, "productDescriptionHtml")),
     "productDescriptionHtml",
-    { aiContent: true, minTextLength: MIN_BLOCK_TEXT_LENGTH }
+    { aiContent: true, minTextLength: MIN_BLOCK_TEXT_LENGTH, warnings: validationWarnings }
   );
-  validateSingleHeading(productDescriptionHtml, "gioi thieu sach", "productDescriptionHtml");
+  productDescriptionHtml = normalizeRequiredSectionHeading(
+    productDescriptionHtml,
+    "Giới thiệu sách",
+    "gioi thieu sach",
+    "productDescriptionHtml",
+    validationWarnings
+  );
   validateForeignPraiseIncluded(productDescriptionHtml, input.bookDNA.foreignPraiseQuotes ?? []);
 
-  const marketingBlocksHtml = validateHtml(
+  let marketingBlocksHtml = validateHtml(
     sanitizeProductDescriptionHtml(readRequiredString(result.marketingBlocksHtml, "marketingBlocksHtml")),
     "marketingBlocksHtml",
-    { aiContent: true, minTextLength: MIN_BLOCK_TEXT_LENGTH }
+    { aiContent: true, minTextLength: MIN_BLOCK_TEXT_LENGTH, warnings: validationWarnings }
   );
-  validateSingleHeading(marketingBlocksHtml, "cuon sach nay danh cho ai", "marketingBlocksHtml");
+  marketingBlocksHtml = normalizeRequiredSectionHeading(
+    marketingBlocksHtml,
+    "Cuốn sách này dành cho ai",
+    "cuon sach nay danh cho ai",
+    "marketingBlocksHtml",
+    validationWarnings
+  );
 
-  const finalBodyHtml = validateHtml(buildFinalBodyHtml(input.product, productDescriptionHtml, marketingBlocksHtml), "finalBodyHtml");
+  const finalBodyHtml = validateHtml(buildFinalBodyHtml(input.product, productDescriptionHtml, marketingBlocksHtml), "finalBodyHtml", {
+    checkForbiddenFiller: false
+  });
   const telegramPreview = readRequiredString(result.telegramPreview, "telegramPreview");
 
   return {
@@ -361,6 +376,7 @@ function normalizeAiResult(result: RawAiProductSeoResult, input: ProductSeoMarke
       ...(input.bookDNA.confidence < 50
         ? ["Book DNA confidence thấp; mô tả cần thận trọng vì dữ liệu sản phẩm còn thiếu."]
         : []),
+      ...validationWarnings,
       ...(Array.isArray(result.warnings)
         ? result.warnings.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)
         : [])
@@ -529,7 +545,7 @@ export function sanitizeProductDescriptionHtml(html: string): string {
 function validateHtml(
   html: string,
   fieldName: string,
-  options: { aiContent?: boolean; minTextLength?: number } = {}
+  options: { aiContent?: boolean; minTextLength?: number; warnings?: string[]; checkForbiddenFiller?: boolean } = {}
 ): string {
   const plainText = stripHtml(html);
   const minTextLength = options.minTextLength ?? MIN_FINAL_TEXT_LENGTH;
@@ -541,17 +557,17 @@ function validateHtml(
     throw new AppError(`HTML sau sanitize còn chứa tag/attribute không hợp lệ: ${fieldName}`, "AI_PRODUCT_SEO_UNSAFE_HTML");
   }
 
-  if (FORBIDDEN_FILLER_PATTERNS.some((pattern) => pattern.test(plainText))) {
-    throw new AppError(`HTML sau sanitize còn chứa filler bị cấm: ${fieldName}`, "AI_PRODUCT_SEO_FORBIDDEN_FILLER");
-  }
-
   const normalizedText = normalizeForQualityCheck(plainText);
-  const forbiddenPhrase = findForbiddenNormalizedPhrase(normalizedText);
-  if (forbiddenPhrase) {
-    throw new AppError(
-      `HTML sau sanitize còn chứa cụm SEO/filler bị cấm "${forbiddenPhrase}": ${fieldName}`,
-      "AI_PRODUCT_SEO_FORBIDDEN_FILLER"
-    );
+  if (options.checkForbiddenFiller !== false) {
+    const hasForbiddenFillerPattern = FORBIDDEN_FILLER_PATTERNS.some((pattern) => pattern.test(plainText));
+    if (hasForbiddenFillerPattern) {
+      handleForbiddenFiller(`Bản nháp có filler/cụm sáo bị cấm trong ${fieldName}.`, options.warnings);
+    }
+
+    const forbiddenPhrase = findForbiddenNormalizedPhrase(normalizedText);
+    if (forbiddenPhrase) {
+      handleForbiddenFiller(`Bản nháp có cụm bị cấm "${forbiddenPhrase}" trong ${fieldName}.`, options.warnings);
+    }
   }
 
   if (options.aiContent) {
@@ -567,14 +583,55 @@ function validateHtml(
   return html;
 }
 
-function validateSingleHeading(html: string, normalizedHeading: string, fieldName: string): void {
-  const headings = Array.from(html.matchAll(/<h2>([\s\S]*?)<\/h2>/gi)).map((match) =>
+function handleForbiddenFiller(message: string, warnings?: string[]): void {
+  if (warnings) {
+    warnings.push(message);
+    return;
+  }
+
+  throw new AppError(message, "AI_PRODUCT_SEO_FORBIDDEN_FILLER");
+}
+
+function normalizeRequiredSectionHeading(
+  html: string,
+  requiredHeading: string,
+  normalizedHeading: string,
+  fieldName: string,
+  warnings: string[]
+): string {
+  const originalHeadings = Array.from(html.matchAll(/<h2>([\s\S]*?)<\/h2>/gi)).map((match) =>
     normalizeForQualityCheck(stripHtml(match[1]))
   );
+  const hadH3 = /<h3>/i.test(html);
+  let normalizedHtml = html.replace(/<\/?h3>/gi, "");
+  let replacedFirstHeading = false;
 
-  if (headings.length !== 1 || headings[0] !== normalizedHeading || /<h3>/i.test(html)) {
+  normalizedHtml = normalizedHtml.replace(/<h2>([\s\S]*?)<\/h2>/gi, (_match, headingText: string) => {
+    if (!replacedFirstHeading) {
+      replacedFirstHeading = true;
+      return `<h2>${requiredHeading}</h2>`;
+    }
+
+    const text = stripHtml(headingText);
+    return text ? `<p><strong>${escapeHtml(text)}</strong></p>` : "";
+  });
+
+  if (!replacedFirstHeading) {
+    normalizedHtml = `<h2>${requiredHeading}</h2>\n${normalizedHtml}`;
+  }
+
+  if (originalHeadings.length !== 1 || originalHeadings[0] !== normalizedHeading || hadH3) {
+    warnings.push(`AI sai heading ở ${fieldName}; bot đã ép về "${requiredHeading}".`);
+  }
+
+  const finalHeadings = Array.from(normalizedHtml.matchAll(/<h2>([\s\S]*?)<\/h2>/gi)).map((match) =>
+    normalizeForQualityCheck(stripHtml(match[1]))
+  );
+  if (finalHeadings.length !== 1 || finalHeadings[0] !== normalizedHeading || /<h3>/i.test(normalizedHtml)) {
     throw new AppError(`AI sai cấu trúc heading bắt buộc: ${fieldName}`, "AI_PRODUCT_SEO_INVALID_STRUCTURE");
   }
+
+  return normalizedHtml;
 }
 
 function findForbiddenNormalizedPhrase(normalizedText: string): string | undefined {
