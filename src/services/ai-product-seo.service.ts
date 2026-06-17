@@ -240,7 +240,6 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
           vendor: input.product.vendor,
           productType: input.product.productType,
           tags: input.product.tags,
-          variants: input.product.variants,
           seoTitle: input.product.seoTitle ?? input.product.metaTitle,
           metaDescription: input.product.metaDescription ?? input.product.seoDescription
         },
@@ -336,6 +335,12 @@ function normalizeAiResult(result: RawAiProductSeoResult, input: ProductSeoMarke
     "productDescriptionHtml",
     { aiContent: true, minTextLength: MIN_BLOCK_TEXT_LENGTH, warnings: validationWarnings }
   );
+  productDescriptionHtml = keepOnlySectionByHeading(
+    productDescriptionHtml,
+    "gioi thieu sach",
+    "productDescriptionHtml",
+    validationWarnings
+  );
   productDescriptionHtml = normalizeRequiredSectionHeading(
     productDescriptionHtml,
     "Giới thiệu sách",
@@ -349,6 +354,12 @@ function normalizeAiResult(result: RawAiProductSeoResult, input: ProductSeoMarke
     sanitizeProductDescriptionHtml(readRequiredString(result.marketingBlocksHtml, "marketingBlocksHtml")),
     "marketingBlocksHtml",
     { aiContent: true, minTextLength: MIN_BLOCK_TEXT_LENGTH, warnings: validationWarnings }
+  );
+  marketingBlocksHtml = keepOnlySectionByHeading(
+    marketingBlocksHtml,
+    "cuon sach nay danh cho ai",
+    "marketingBlocksHtml",
+    validationWarnings
   );
   marketingBlocksHtml = normalizeRequiredSectionHeading(
     marketingBlocksHtml,
@@ -428,7 +439,7 @@ function buildPublicationInfoHtml(product: NormalizedSapoProduct): string {
       ])
     ],
     ["Số trang", readProductMetadata(raw, ["pages", "page_count", "number_of_pages", "so_trang", "số trang"])],
-    ["Kích thước", readProductMetadata(raw, ["size", "dimensions", "book_size", "kich_thuoc", "kích thước"])]
+    ["Kích thước", readProductMetadata(raw, ["book_size", "book_dimensions", "product_dimensions", "kich_thuoc", "kích thước"])]
   ].filter((field): field is [string, string] => typeof field[1] === "string" && field[1].trim().length > 0);
 
   const rows = fields.map(([label, value]) => `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</p>`);
@@ -590,6 +601,25 @@ function handleForbiddenFiller(message: string, warnings?: string[]): void {
   }
 
   throw new AppError(message, "AI_PRODUCT_SEO_FORBIDDEN_FILLER");
+}
+
+function keepOnlySectionByHeading(html: string, normalizedHeading: string, fieldName: string, warnings: string[]): string {
+  const matches = Array.from(html.matchAll(/<h2>([\s\S]*?)<\/h2>/gi));
+  if (matches.length === 0) {
+    return html;
+  }
+
+  const targetIndex = matches.findIndex((match) => normalizeForQualityCheck(stripHtml(match[1])) === normalizedHeading);
+  const sectionIndex = targetIndex >= 0 ? targetIndex : 0;
+  const start = matches[sectionIndex].index ?? 0;
+  const end = matches[sectionIndex + 1]?.index ?? html.length;
+  const section = html.slice(start, end).trim();
+
+  if (matches.length > 1 || targetIndex < 0) {
+    warnings.push(`AI trả nhiều section trong ${fieldName}; bot đã giữ đúng block cần dùng.`);
+  }
+
+  return section || html;
 }
 
 function normalizeRequiredSectionHeading(

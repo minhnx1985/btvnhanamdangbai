@@ -157,16 +157,15 @@ export async function analyzeBookDNA(input: BookDNAInput): Promise<BookDNA> {
           title: input.product.title,
           alias: input.product.alias,
           handle: input.product.handle,
-          content: input.product.content,
-          summary: input.product.summary,
+          content: truncatePromptText(input.product.content, 2500),
+          summary: truncatePromptText(input.product.summary, 1500),
           vendor: input.product.vendor,
           productType: input.product.productType,
           tags: input.product.tags,
-          variants: input.product.variants,
           seoTitle: input.product.seoTitle ?? input.product.metaTitle,
           metaDescription: input.product.metaDescription ?? input.product.seoDescription
         },
-        relatedData: input.relatedData ?? {},
+        relatedData: compactRelatedData(input.relatedData),
         preAnalysisHumanEnrichment
       })
     }
@@ -274,12 +273,11 @@ export async function enrichBookDNA(input: HumanEnrichmentInput): Promise<{
           title: input.product.title,
           alias: input.product.alias,
           handle: input.product.handle,
-          content: input.product.content,
-          summary: input.product.summary,
+          content: truncatePromptText(input.product.content, 2500),
+          summary: truncatePromptText(input.product.summary, 1500),
           vendor: input.product.vendor,
           productType: input.product.productType,
-          tags: input.product.tags,
-          variants: input.product.variants
+          tags: input.product.tags
         },
         currentBookDNA: input.currentBookDNA,
         humanEnrichment: enrichmentSource
@@ -329,7 +327,7 @@ async function prepareHumanEnrichmentSource(rawText: string): Promise<{
   return {
     originalText: text,
     detectedUrls,
-    fetchedText
+    fetchedText: fetchedText?.slice(0, 6000)
   };
 }
 
@@ -349,7 +347,7 @@ async function fetchReadableUrlText(url: string): Promise<string | undefined> {
       }
     });
 
-    return stripHtmlToReadableText(String(response.data)).slice(0, 12000);
+    return stripHtmlToReadableText(String(response.data)).slice(0, 6000);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown URL fetch error";
     logger.warn("book_dna_enrichment_url_fetch_failed", { url, reason });
@@ -380,6 +378,38 @@ async function generateHumanEnrichmentJson(messages: ShopApiChatMessage[]): Prom
 
     throw error;
   }
+}
+
+function compactRelatedData(relatedData: BookDNAInput["relatedData"]): BookDNAInput["relatedData"] {
+  if (!relatedData) {
+    return undefined;
+  }
+
+  return {
+    currentContentText: truncatePromptText(relatedData.currentContentText, 2500),
+    summaryText: truncatePromptText(relatedData.summaryText, 1500),
+    tags: relatedData.tags?.slice(0, 20),
+    categories: relatedData.categories?.slice(0, 10),
+    sameAuthorProducts: relatedData.sameAuthorProducts?.slice(0, 5).map((product) => ({
+      title: product.title,
+      alias: product.alias,
+      summary: truncatePromptText(product.summary, 500)
+    })),
+    humanEnrichmentText: truncatePromptText(relatedData.humanEnrichmentText, 6000)
+  };
+}
+
+function truncatePromptText(value: string | undefined, maxLength: number): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength).trim()} [truncated]`;
 }
 
 async function generateBookDNAJson(messages: ShopApiChatMessage[]): Promise<RawBookDNA> {

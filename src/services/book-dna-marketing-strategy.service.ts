@@ -3,7 +3,7 @@ import path from "node:path";
 import { logger } from "../utils/logger";
 
 const STRATEGY_FILE_NAME = "book-dna-marketing-strategy.md";
-const MAX_STRATEGY_PROMPT_LENGTH = 22000;
+const MAX_STRATEGY_PROMPT_LENGTH = 6000;
 
 let cachedStrategyPrompt: string | null = null;
 
@@ -22,13 +22,13 @@ export function getBookDnaMarketingStrategyPrompt(): string {
   }
 
   const selectedSections = [
-    excerptSection(rawStrategy, "## 1. Purpose", 2200),
-    excerptSection(rawStrategy, "## 6. Book DNA Framework", 5200),
-    excerptSection(rawStrategy, "## 8. Positioning Framework", 5200),
-    excerptSection(rawStrategy, "## 9. Marketing Strategy Framework", 3200),
-    excerptFromMarker(rawStrategy, "Content rules:", 3200),
-    excerptSection(rawStrategy, "## 15. Risk Audit Framework", 3200),
-    excerptSection(rawStrategy, "## 17. Self-Audit Checklist", 2600)
+    excerptSection(rawStrategy, "## 1. Purpose", 800),
+    excerptSection(rawStrategy, "## 6. Book DNA Framework", 1800),
+    excerptSection(rawStrategy, "## 8. Positioning Framework", 1400),
+    excerptSection(rawStrategy, "## 9. Marketing Strategy Framework", 900),
+    excerptFromMarker(rawStrategy, "Content rules:", 900),
+    excerptSection(rawStrategy, "## 15. Risk Audit Framework", 700),
+    excerptSection(rawStrategy, "## 17. Self-Audit Checklist", 500)
   ]
     .filter(Boolean)
     .join("\n\n");
