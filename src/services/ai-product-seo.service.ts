@@ -504,16 +504,18 @@ function htmlToTextBlocks(html: string): string[] {
       .replace(/<[^>]+>/g, " ")
   )
     .split(/\n+/)
-    .map((block) => block.replace(/\s+/g, " ").trim())
+    .map((block) => stripMarkdownHeadingMarker(block.replace(/\s+/g, " ").trim()))
     .filter(Boolean);
 }
 
 function splitExistingDescriptionSections(blocks: string[]): { introduction: string[]; audience: string[] } {
   const audienceHeadingIndex = blocks.findIndex((block) => {
-    const normalized = normalizeForQualityCheck(block);
+    const normalized = normalizeSectionHeadingForFormat(block);
     return normalized === "cuon sach nay danh cho ai" || normalized.includes("danh cho ai");
   });
-  const publicationHeadingIndex = blocks.findIndex((block) => normalizeForQualityCheck(block).includes("thong tin xuat ban"));
+  const publicationHeadingIndex = blocks.findIndex((block) =>
+    normalizeSectionHeadingForFormat(block).includes("thong tin xuat ban")
+  );
   const endIndex = publicationHeadingIndex >= 0 ? publicationHeadingIndex : blocks.length;
 
   if (audienceHeadingIndex >= 0 && audienceHeadingIndex < endIndex) {
@@ -531,7 +533,7 @@ function splitExistingDescriptionSections(blocks: string[]): { introduction: str
 
 function removeKnownSectionHeadings(blocks: string[]): string[] {
   return blocks.filter((block) => {
-    const normalized = normalizeForQualityCheck(block);
+    const normalized = normalizeSectionHeadingForFormat(block);
     return (
       normalized !== "gioi thieu sach" &&
       normalized !== "cuon sach nay danh cho ai" &&
@@ -577,7 +579,35 @@ function stripListMarker(block: string): string {
   return block.replace(/^\s*(?:[-*•–]|\d{1,2}[.)])\s+/, "").trim();
 }
 
+function stripMarkdownHeadingMarker(block: string): string {
+  return block.replace(/^\s{0,3}#{1,6}\s+/, "").trim();
+}
+
+function normalizeSectionHeadingForFormat(block: string): string {
+  return normalizeForQualityCheck(stripMarkdownInlineMarkers(stripMarkdownHeadingMarker(block))).replace(/[:：]+$/g, "").trim();
+}
+
+function stripMarkdownInlineMarkers(text: string): string {
+  return text.replace(/(\*\*|\*)([^*]+)\1/g, "$2").replace(/(__|_)([^_]+)\1/g, "$2");
+}
+
 function formatTextWithBookTitleStrong(text: string, productTitle?: string): string {
+  const emphasisPattern = /(\*\*|\*)([^*\n]+?)\1/g;
+  let rendered = "";
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = emphasisPattern.exec(text)) !== null) {
+    rendered += formatPlainTextWithBookTitleStrong(text.slice(lastIndex, match.index), productTitle);
+    rendered += `<strong>${escapeHtml(match[2].trim())}</strong>`;
+    lastIndex = match.index + match[0].length;
+  }
+
+  rendered += formatPlainTextWithBookTitleStrong(text.slice(lastIndex), productTitle);
+  return rendered;
+}
+
+function formatPlainTextWithBookTitleStrong(text: string, productTitle?: string): string {
   const title = typeof productTitle === "string" ? productTitle.trim() : "";
   if (!title) {
     return escapeHtml(text);
