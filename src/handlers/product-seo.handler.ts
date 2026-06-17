@@ -372,13 +372,6 @@ async function formatSubmittedProductDescriptionByAlias(
     mode: "format_submitted_description"
   });
 
-  const bookDNA = createFormatOnlyBookDNA(product.title);
-  const audit = {
-    currentSeoScore: 0,
-    currentMarketingScore: 0,
-    issues: [],
-    opportunities: []
-  };
   const supplementInput = buildFormatDescriptionInput(product, submittedDescriptionText, formatMode);
   const formattedResult = await smartFormatSubmittedProductDescription(product, supplementInput.sourceText);
   if (supplementInput.warning) {
@@ -392,45 +385,43 @@ async function formatSubmittedProductDescriptionByAlias(
     formatMode
   });
 
-  const updateJob: ProductSeoPendingJob = {
-    type: "product_seo_marketing_update",
-    jobId: randomUUID(),
+  if (
+    await rejectProductEditIfNeeded(ctx, userId, {
+      productId: product.id,
+      alias,
+      mode: "format_submitted_description",
+      formatMode
+    })
+  ) {
+    return;
+  }
+
+  await sapoProductService.updateProductContent(product.id, formattedResult.finalBodyHtml, `<!-- seo-bot-auto-update:${randomUUID()} -->`, {
     userId,
     productId: product.id,
-    productAlias: alias,
-    productTitle: product.title,
-    product,
-    seoTitle: formattedResult.seoTitle,
-    metaDescription: formattedResult.metaDescription,
-    finalBodyHtml: formattedResult.finalBodyHtml,
-    bookDNA,
-    audit: {
-      currentSeoScore: audit.currentSeoScore,
-      currentMarketingScore: audit.currentMarketingScore,
-      improvedSeoScore: formattedResult.improvedSeoScore,
-      improvedMarketingScore: formattedResult.improvedMarketingScore,
-      issues: audit.issues,
-      opportunities: audit.opportunities,
-      warnings: formattedResult.warnings
-    },
-    createdAt: Date.now()
-  };
-
-  saveProductSeoPendingJob(updateJob);
-  logger.info("product_seo_pending_created", {
-    userId,
-    jobId: updateJob.jobId,
-    productId: updateJob.productId,
-    alias: updateJob.productAlias,
+    alias,
     mode: "format_submitted_description",
     formatMode
   });
-  await replyWithButtonsSafely(ctx, buildPreviewMessage(updateJob), buildActionButtons(updateJob.jobId), {
+
+  logger.info("product_seo_update_description_success", {
     userId,
-    jobId: updateJob.jobId,
-    productId: updateJob.productId,
-    alias: updateJob.productAlias
+    productId: product.id,
+    alias,
+    mode: "format_submitted_description",
+    formatMode
   });
+  await replySafely(
+    ctx,
+    [
+      formatMode === "append" ? "Đã bổ sung và cập nhật mô tả sản phẩm:" : "Đã cập nhật mô tả sản phẩm:",
+      "",
+      product.title,
+      buildProductUrl(alias),
+      ...(formattedResult.warnings.length > 0 ? ["", "Cảnh báo:", formatList(formattedResult.warnings)] : [])
+    ].join("\n"),
+    { userId, productId: product.id, alias, formatMode }
+  );
 }
 
 function buildFormatDescriptionInput(
