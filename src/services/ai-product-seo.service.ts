@@ -430,7 +430,8 @@ export async function smartFormatSubmittedProductDescription(
     "finalBodyHtml",
     { checkForbiddenFiller: false, allowInlineStyles: true }
   );
-  const finalBodyHtml = validateHtml(applyProductDescriptionSpacing(formattedHtml), "finalBodyHtml", {
+  const structuredHtml = enforceAudienceSectionsAsLists(formattedHtml, warnings);
+  const finalBodyHtml = validateHtml(applyProductDescriptionSpacing(structuredHtml), "finalBodyHtml", {
     checkForbiddenFiller: false,
     allowInlineStyles: true
   });
@@ -1008,6 +1009,33 @@ function applyProductDescriptionSpacing(html: string): string {
     .replace(/<li>/g, `<li style="line-height: 1.2; margin-bottom: 0.5em;">`)
     .replace(/<h2>/g, `<h2 style="line-height: 1.2; margin: 1.5em 0 0.75em;">`)
     .replace(/<h3>/g, `<h3 style="line-height: 1.2; margin: 1.5em 0 0.75em;">`);
+}
+
+function enforceAudienceSectionsAsLists(html: string, warnings: string[]): string {
+  return html.replace(/<(h2|h3)>([\s\S]*?)<\/\1>([\s\S]*?)(?=<h[23]>|$)/gi, (match, tagName: string, heading: string, body: string) => {
+    const normalizedHeading = normalizeForQualityCheck(stripHtml(heading));
+    if (!normalizedHeading.includes("danh cho ai") || /<(?:ul|ol)>/i.test(body)) {
+      return match;
+    }
+
+    const paragraphMatches = Array.from(body.matchAll(/<p(?:\sstyle="text-align: right;")?>([\s\S]*?)<\/p>/gi));
+    const items = paragraphMatches
+      .filter((paragraphMatch) => !/\sstyle="text-align: right;"/i.test(paragraphMatch[0]))
+      .map((paragraphMatch) => paragraphMatch[1].trim())
+      .filter((item) => stripHtml(item).length > 0);
+
+    if (items.length === 0) {
+      return match;
+    }
+
+    warnings.push("Bot đã chuyển phần 'dành cho ai' thành bullet list.");
+    return [
+      `<${tagName}>${heading}</${tagName}>`,
+      "<ul>",
+      ...items.map((item) => `<li>${item}</li>`),
+      "</ul>"
+    ].join("\n");
+  });
 }
 
 function cleanProcessLanguageHtml(html: string, fieldName: string, warnings: string[]): string {
