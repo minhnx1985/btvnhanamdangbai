@@ -4,7 +4,7 @@ import { AppError } from "../utils/errors";
 import { getBookDnaMarketingStrategyPrompt } from "./book-dna-marketing-strategy.service";
 import { stripHtml } from "./product-audit.service";
 
-const ALLOWED_HTML_TAGS = new Set(["p", "h2", "h3", "strong", "em", "ul", "li"]);
+const ALLOWED_HTML_TAGS = new Set(["p", "h2", "h3", "strong", "em", "blockquote", "ul", "ol", "li"]);
 const MIN_FINAL_TEXT_LENGTH = 80;
 const MIN_BLOCK_TEXT_LENGTH = 20;
 const FORBIDDEN_FILLER_PATTERNS = [
@@ -100,6 +100,12 @@ type RawAiProductSeoResult = {
   telegramPreview?: unknown;
   improvedSeoScore?: unknown;
   improvedMarketingScore?: unknown;
+  warnings?: unknown;
+};
+
+type RawAiDescriptionFormatResult = {
+  finalBodyHtml?: unknown;
+  telegramPreview?: unknown;
   warnings?: unknown;
 };
 
@@ -341,6 +347,109 @@ export function formatExistingProductDescription(product: NormalizedSapoProduct,
           ]
         : [])
     ]
+  };
+}
+
+export async function smartFormatSubmittedProductDescription(
+  product: NormalizedSapoProduct,
+  sourceText: string
+): Promise<ProductSeoMarketingResult> {
+  const inputText = sourceText.trim();
+  if (!inputText) {
+    throw new AppError("Mô tả bạn gửi chưa có nội dung để format.", "PRODUCT_DESCRIPTION_SOURCE_EMPTY");
+  }
+
+  const messages: ShopApiChatMessage[] = [
+    {
+      role: "system",
+      content: [
+        "Bạn là trợ lý format HTML cho mô tả sách trên website Nhã Nam.",
+        "",
+        "Nhiệm vụ duy nhất:",
+        "- Chuyển nội dung người dùng nhập thành HTML sạch, dễ đọc.",
+        "- Không viết lại câu.",
+        "- Không thêm ý.",
+        "- Không xóa ý.",
+        "- Không đổi thứ tự ý.",
+        "- Không thay từ đồng nghĩa.",
+        "- Không sửa văn phong.",
+        "",
+        "Được phép:",
+        "- Chia đoạn theo xuống dòng và cấu trúc có sẵn.",
+        "- Chuyển heading markdown hoặc heading viết hoa thành h2/h3.",
+        "- Chuyển danh sách thành ul/ol/li nếu người dùng đã viết theo dạng danh sách hoặc từng dòng.",
+        "- In đậm tên sách bằng strong.",
+        "- In nghiêng tên tác giả bằng em.",
+        "",
+        "Quy tắc praise/review:",
+        "- Nếu có lời khen/praise/review dạng trích dẫn, đặt phần lời khen trong một đoạn riêng: <p><em>praise text</em></p>.",
+        "- Dòng người/báo chí praise đặt ngay sau lời khen: <p style=\"text-align: right;\"><strong>Người / báo chí praise</strong></p>.",
+        "- Không tự tạo praise mới.",
+        "- Không tự đoán nguồn praise nếu text không có nguồn.",
+        "",
+        "HTML được dùng:",
+        "- h2, h3, p, strong, em, blockquote, ul, ol, li.",
+        "- Riêng p nguồn praise được dùng style đúng y hệt: style=\"text-align: right;\".",
+        "",
+        "Không dùng:",
+        "- markdown.",
+        "- img, iframe, script, a.",
+        "- class, id, data attribute.",
+        "- inline style khác ngoài text-align right cho nguồn praise.",
+        "",
+        "Output bắt buộc là JSON hợp lệ:",
+        JSON.stringify({
+          finalBodyHtml: "<h2>...</h2><p>...</p>",
+          telegramPreview: "...",
+          warnings: []
+        }),
+        "",
+        "Không giải thích ngoài JSON."
+      ].join("\n")
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        product: {
+          id: product.id,
+          title: product.title,
+          alias: product.alias,
+          handle: product.handle
+        },
+        sourceText: inputText
+      })
+    }
+  ];
+
+  const result = await shopApiService.generateJson<RawAiDescriptionFormatResult>(messages);
+  const warnings = Array.isArray(result.warnings)
+    ? result.warnings.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)
+    : [];
+  const formattedHtml = validateHtml(
+    sanitizeSmartFormattedDescriptionHtml(readRequiredString(result.finalBodyHtml, "finalBodyHtml")),
+    "finalBodyHtml",
+    { checkForbiddenFiller: false, allowInlineStyles: true }
+  );
+  const finalBodyHtml = validateHtml(applyProductDescriptionSpacing(formattedHtml), "finalBodyHtml", {
+    checkForbiddenFiller: false,
+    allowInlineStyles: true
+  });
+  const plainText = stripHtml(finalBodyHtml);
+  const telegramPreview =
+    typeof result.telegramPreview === "string" && result.telegramPreview.trim()
+      ? result.telegramPreview.trim()
+      : plainText.slice(0, 1200);
+
+  return {
+    seoTitle: product.title,
+    metaDescription: plainText.slice(0, 160),
+    productDescriptionHtml: finalBodyHtml,
+    marketingBlocksHtml: "",
+    finalBodyHtml,
+    telegramPreview,
+    improvedSeoScore: 0,
+    improvedMarketingScore: 0,
+    warnings
   };
 }
 
@@ -866,6 +975,41 @@ export function sanitizeProductDescriptionHtml(html: string): string {
     });
 }
 
+function sanitizeSmartFormattedDescriptionHtml(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<img[^>]*>/gi, "")
+    .replace(/<a\b[\s\S]*?>/gi, "")
+    .replace(/<\/a>/gi, "")
+    .replace(/<\/?([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?>/g, (fullTag, tagName: string) => {
+      const normalizedTag = tagName.toLowerCase();
+      if (!ALLOWED_HTML_TAGS.has(normalizedTag)) {
+        return "";
+      }
+
+      if (fullTag.startsWith("</")) {
+        return `</${normalizedTag}>`;
+      }
+
+      if (normalizedTag === "p" && /\bstyle\s*=\s*["'][^"']*text-align\s*:\s*right\s*;?[^"']*["']/i.test(fullTag)) {
+        return `<p style="text-align: right;">`;
+      }
+
+      return `<${normalizedTag}>`;
+    });
+}
+
+function applyProductDescriptionSpacing(html: string): string {
+  return html
+    .replace(/<p style="text-align: right;">/g, `<p style="line-height: 1.2; margin-bottom: 1.5em; text-align: right;">`)
+    .replace(/<p>/g, `<p style="line-height: 1.2; margin-bottom: 1.5em;">`)
+    .replace(/<li>/g, `<li style="line-height: 1.2; margin-bottom: 0.5em;">`)
+    .replace(/<h2>/g, `<h2 style="line-height: 1.2; margin: 1.5em 0 0.75em;">`)
+    .replace(/<h3>/g, `<h3 style="line-height: 1.2; margin: 1.5em 0 0.75em;">`);
+}
+
 function cleanProcessLanguageHtml(html: string, fieldName: string, warnings: string[]): string {
   let removedCount = 0;
   let cleaned = html.replace(/<(p|li)>([\s\S]*?)<\/\1>/gi, (fullMatch, tagName: string, innerHtml: string) => {
@@ -906,7 +1050,13 @@ function hasProcessLanguage(text: string): boolean {
 function validateHtml(
   html: string,
   fieldName: string,
-  options: { aiContent?: boolean; minTextLength?: number; warnings?: string[]; checkForbiddenFiller?: boolean } = {}
+  options: {
+    aiContent?: boolean;
+    minTextLength?: number;
+    warnings?: string[];
+    checkForbiddenFiller?: boolean;
+    allowInlineStyles?: boolean;
+  } = {}
 ): string {
   const plainText = stripHtml(html);
   const minTextLength = options.minTextLength ?? MIN_FINAL_TEXT_LENGTH;
@@ -914,8 +1064,12 @@ function validateHtml(
     throw new AppError(`HTML sau sanitize rỗng hoặc quá ngắn: ${fieldName}`, "AI_PRODUCT_SEO_HTML_TOO_SHORT");
   }
 
-  if (/<script|<iframe|<img|style=/i.test(html)) {
+  if (/<script|<iframe|<img/i.test(html) || (!options.allowInlineStyles && /style=/i.test(html))) {
     throw new AppError(`HTML sau sanitize còn chứa tag/attribute không hợp lệ: ${fieldName}`, "AI_PRODUCT_SEO_UNSAFE_HTML");
+  }
+
+  if (options.allowInlineStyles && hasUnsafeInlineStyle(html)) {
+    throw new AppError(`HTML sau sanitize còn chứa style không hợp lệ: ${fieldName}`, "AI_PRODUCT_SEO_UNSAFE_HTML");
   }
 
   const normalizedText = normalizeForQualityCheck(plainText);
@@ -942,6 +1096,27 @@ function validateHtml(
   }
 
   return html;
+}
+
+function hasUnsafeInlineStyle(html: string): boolean {
+  const allowedStyles = new Set([
+    "text-align: right;",
+    "line-height: 1.2; margin-bottom: 1.5em;",
+    "line-height: 1.2; margin-bottom: 0.5em;",
+    "line-height: 1.2; margin: 1.5em 0 0.75em;",
+    "line-height: 1.2; margin-bottom: 1.5em; text-align: right;"
+  ]);
+  const matches = Array.from(html.matchAll(/\sstyle="([^"]*)"/gi));
+  return matches.some((match) => !allowedStyles.has(normalizeInlineStyle(match[1])));
+}
+
+function normalizeInlineStyle(style: string): string {
+  return style
+    .split(";")
+    .map((part) => part.trim().replace(/\s*:\s*/g, ": ").replace(/\s+/g, " "))
+    .filter(Boolean)
+    .join("; ")
+    .concat(style.trim().endsWith(";") ? ";" : ";");
 }
 
 function handleForbiddenFiller(message: string, warnings?: string[]): void {

@@ -3,7 +3,11 @@ import { Context } from "telegraf";
 import { canEditProducts } from "../bot/guards";
 import { analyzeBookDNA, enrichBookDNA } from "../services/book-dna.service";
 import { auditProductSeoMarketing, stripHtml } from "../services/product-audit.service";
-import { formatExistingProductDescription, generateProductSeoMarketing } from "../services/ai-product-seo.service";
+import {
+  formatExistingProductDescription,
+  generateProductSeoMarketing,
+  smartFormatSubmittedProductDescription
+} from "../services/ai-product-seo.service";
 import { extractNhanamProductAlias } from "../services/product-url.service";
 import { sapoProductService } from "../services/sapo-product.service";
 import {
@@ -52,7 +56,7 @@ type BufferedEnrichmentInput = {
 const MAX_PREVIEW_LENGTH = 3400;
 const ENRICHMENT_INPUT_DEBOUNCE_MS = 4000;
 const SEO_FIELDS_DISABLED_MESSAGE =
-  "Hiện chưa xác định chắc field SEO trong Sapo Product API. Bot chưa cập nhật SEO fields.";
+  "Flow đã đổi: bot chỉ cập nhật mô tả sản phẩm từ nội dung bạn tự nhập, không cập nhật SEO fields.";
 const PRODUCT_EDIT_FORBIDDEN_MESSAGE =
   "Bạn không có quyền sửa sản phẩm Sapo. Chỉ Telegram ID 1623038607 được phép cập nhật sản phẩm; phần blog vẫn dùng bình thường.";
 
@@ -142,61 +146,21 @@ function formatList(items: string[]): string {
 }
 
 function buildPreviewMessage(job: ProductSeoPendingJob): string {
-  const hasForbiddenDraftWarning = job.audit.warnings.some((warning) => /cụm bị cấm|filler|cụm sáo/i.test(warning));
   const preview = [
-    "Đã phân tích sản phẩm:",
+    "Đã format mô tả mới:",
     "",
     `Tên: ${job.productTitle}`,
     `Alias: ${job.productAlias}`,
     `ID: ${job.productId}`,
     "",
-    "BOOK DNA",
-    `Loại sách: ${job.bookDNA.bookType || "Chưa rõ"}`,
-    `Sức hút chính: ${job.bookDNA.coreAppeal || "Chưa rõ"}`,
-    `Angle marketing: ${job.bookDNA.marketingAngle || "Chưa rõ"}`,
-    "Độc giả mục tiêu:",
-    formatList(job.bookDNA.targetReaders),
-    "Lý do mua:",
-    formatList(job.bookDNA.buyingReasons),
-    `Confidence: ${job.bookDNA.confidence}/100`,
-    "",
-    ...(job.bookDNA.confidence < 40
-      ? [
-          "Cảnh báo: dữ liệu sản phẩm hiện quá ít để viết mô tả marketing tốt. Nên bổ sung mô tả gốc, back cover, thông tin tác giả hoặc nội dung sách trước khi cập nhật.",
-          ""
-        ]
-      : []),
-    `SEO hiện tại: ${job.audit.currentSeoScore}/100`,
-    `Marketing hiện tại: ${job.audit.currentMarketingScore}/100`,
-    "",
-    "Vấn đề phát hiện:",
-    formatList(job.audit.issues),
-    "",
-    "Cơ hội tối ưu:",
-    formatList(job.audit.opportunities),
-    "",
-    "Đề xuất mới:",
-    "",
-    "Meta title:",
-    job.seoTitle,
-    "",
-    "Meta description:",
-    job.metaDescription,
-    "",
     "Preview mô tả:",
     stripHtml(job.finalBodyHtml),
     "",
-    `SEO sau tối ưu dự kiến: ${job.audit.improvedSeoScore}/100`,
-    `Marketing sau tối ưu dự kiến: ${job.audit.improvedMarketingScore}/100`
+    "Bạn muốn cập nhật mô tả sản phẩm bằng bản này không?"
   ];
 
   if (job.audit.warnings.length > 0) {
     preview.push("", "Cảnh báo:", formatList(job.audit.warnings));
-  }
-
-  preview.push("", "Bạn muốn cập nhật phần nào?");
-  if (hasForbiddenDraftWarning) {
-    preview.push("", "Bản nháp có cảnh báo cụm bị cấm. Bạn có thể dùng bản này, viết lại hoặc hủy.");
   }
 
   return truncatePreview(preview.join("\n"));
@@ -204,19 +168,13 @@ function buildPreviewMessage(job: ProductSeoPendingJob): string {
 
 function buildActionButtons(jobId: string): InlineKeyboardButton[][] {
   return [
-    [{ text: "Viết lại", callback_data: `seo_rewrite:${jobId}` }],
     [{ text: "Cập nhật mô tả", callback_data: `seo_desc:${jobId}` }],
-    [{ text: "Cập nhật SEO", callback_data: `seo_meta:${jobId}` }],
-    [{ text: "Cập nhật tất cả", callback_data: `seo_all:${jobId}` }],
     [{ text: "Hủy", callback_data: `seo_cancel:${jobId}` }]
   ];
 }
 
 function buildPreparationButtons(jobId: string): InlineKeyboardButton[][] {
   return [
-    [{ text: "Nhập mô tả mới", callback_data: `seo_auto_write:${jobId}` }],
-    [{ text: "Phân tích luôn", callback_data: `seo_analyze:${jobId}` }],
-    [{ text: "Bổ sung tư liệu", callback_data: `seo_pre_enrich:${jobId}` }],
     [{ text: "Hủy", callback_data: `seo_cancel_detect:${jobId}` }]
   ];
 }
@@ -285,17 +243,20 @@ function buildBookDnaMessage(job: ProductSeoBookUnderstandingJob): string {
 
 async function startProductSeoPreparation(ctx: Context, userId: number, alias: string): Promise<void> {
   const job = saveDetectedProductUrlJob({ userId, alias });
+  setProductSeoFormatDescriptionWait(userId, job.jobId);
   logger.info("product_url_detected", { userId, jobId: job.jobId, alias });
   await replyWithButtonsSafely(
     ctx,
     [
       "Đã nhận URL sản phẩm Nhã Nam.",
       "",
-      "Bạn có tư liệu bổ sung trước khi bot phân tích Book DNA không?",
+      "Bạn gửi nội dung mô tả mới cho sản phẩm này nhé.",
       "",
-      "Nếu bạn đã có mô tả mới, chọn Nhập mô tả mới. Bot sẽ chỉ format text bạn gửi vào cấu trúc chuẩn, không viết lại câu chữ.",
+      "Bot sẽ chỉ dùng AI để format HTML thông minh, không phân tích, không tự viết thêm và không cập nhật Sapo trước khi bạn xác nhận.",
       "",
-      "Có thể gửi back cover, review, bài báo, link Wikipedia/Nhã Nam, thư giới thiệu sách, ghi chú BTV hoặc lời khen từ báo nước ngoài."
+      "Có thể gửi nhiều tin nhắn liên tiếp; bot sẽ nối lại rồi format một lần.",
+      "",
+      "Quy tắc format: tên sách in đậm, tên tác giả in nghiêng, praise tách thành lời khen in nghiêng và nguồn praise căn phải in đậm."
     ].join("\n"),
     buildPreparationButtons(job.jobId),
     { userId, jobId: job.jobId, alias }
@@ -388,7 +349,7 @@ async function formatSubmittedProductDescriptionByAlias(
   submittedDescriptionText: string
 ): Promise<void> {
   logger.info("product_alias_extracted", { userId, alias, mode: "format_submitted_description" });
-  await replySafely(ctx, "Đang format mô tả bạn vừa gửi. Bot sẽ không sửa câu chữ.", { userId, alias });
+  await replySafely(ctx, "Đang dùng AI format mô tả bạn vừa gửi. Bot không tự viết thêm nội dung.", { userId, alias });
 
   const product = await sapoProductService.findProductByAlias(alias);
   if (!product || !product.id || !product.title) {
@@ -405,18 +366,14 @@ async function formatSubmittedProductDescriptionByAlias(
   });
 
   const bookDNA = createFormatOnlyBookDNA(product.title);
-  const audit = auditProductSeoMarketing(product);
-  logger.info("product_audit_completed", {
-    userId,
-    productId: product.id,
-    alias,
-    seoScore: audit.currentSeoScore,
-    marketingScore: audit.currentMarketingScore,
-    mode: "format_submitted_description"
-  });
-
-  const formattedResult = formatExistingProductDescription(product, submittedDescriptionText);
-  logger.info("product_description_formatted", {
+  const audit = {
+    currentSeoScore: 0,
+    currentMarketingScore: 0,
+    issues: [],
+    opportunities: []
+  };
+  const formattedResult = await smartFormatSubmittedProductDescription(product, submittedDescriptionText);
+  logger.info("ai_product_description_formatted", {
     userId,
     productId: product.id,
     alias,
@@ -717,19 +674,7 @@ export async function handleProductSeoEnrichmentText(ctx: TextContext): Promise<
     return true;
   }
 
-  const preparationJob = getProductSeoPreparationWait(userId);
-  if (preparationJob) {
-    bufferProductSeoPreparationInput(ctx, userId, preparationJob, text);
-    return true;
-  }
-
-  const job = getProductSeoEnrichmentWait(userId);
-  if (!job) {
-    return false;
-  }
-
-  bufferProductSeoEnrichmentInput(ctx, userId, job, text);
-  return true;
+  return false;
 }
 
 function bufferProductSeoFormatDescriptionInput(
@@ -992,6 +937,48 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
 
   const [action, jobId] = data.split(":");
   if (!action || !jobId || !action.startsWith("seo_")) {
+    return;
+  }
+
+  if (action === "seo_auto_write") {
+    const detectedJob = getDetectedProductUrlJob(jobId, userId);
+    if (!detectedJob) {
+      await replySafely(ctx, "Job xác nhận đã hết hạn hoặc không thuộc user này.", { userId, jobId });
+      return;
+    }
+
+    setProductSeoFormatDescriptionWait(userId, jobId);
+    await replySafely(
+      ctx,
+      [
+        "Bạn gửi mô tả mới cho sản phẩm này nhé.",
+        "",
+        "Bot sẽ chỉ dùng AI để format HTML thông minh, không phân tích và không tự viết thêm nội dung.",
+        "",
+        "Có thể gửi nhiều tin nhắn liên tiếp; bot sẽ nối lại rồi phản hồi một lần."
+      ].join("\n"),
+      { userId, jobId, alias: detectedJob.alias }
+    );
+    return;
+  }
+
+  if (
+    [
+      "seo_start",
+      "seo_analyze",
+      "seo_pre_enrich",
+      "seo_enrich",
+      "seo_write",
+      "seo_rewrite",
+      "seo_meta",
+      "seo_all"
+    ].includes(action)
+  ) {
+    await replySafely(
+      ctx,
+      "Flow đã đổi: bot chỉ format nội dung bạn tự nhập rồi hỏi cập nhật mô tả. Vui lòng gửi lại link sách để bắt đầu flow mới.",
+      { userId, jobId, action }
+    );
     return;
   }
 
