@@ -77,6 +77,20 @@ const FORBIDDEN_AI_CONTENT_PATTERNS = [
   /\bn(?:a|ă)m\s*ph(?:a|á)t\s*h(?:a|à)nh\b/i
 ];
 
+const PROCESS_LANGUAGE_PATTERNS = [
+  /^Theo\s+(?:mô tả sản phẩm|dữ liệu sản phẩm|Book DNA|phân tích Book DNA|thông tin hiện có)[\s\S]*?[.!?。]?$/i,
+  /^Book DNA\s+(?:hiện|chưa|không|đang)[\s\S]*?[.!?。]?$/i,
+  /^Dữ liệu\s+(?:hiện có|sản phẩm|Book DNA)[\s\S]*?[.!?。]?$/i,
+  /^Mô tả này\s+(?:chỉ|được|tập trung|dựa)[\s\S]*?[.!?。]?$/i,
+  /^Nguồn:\s*[\s\S]*$/i,
+  /^\(Nguồn:\s*[\s\S]*?\)$/i,
+  /\(Nguồn:\s*mô tả sản phẩm\)/i,
+  /\btheo mô tả sản phẩm\b/i,
+  /\btheo dữ liệu sản phẩm\b/i,
+  /\bBook DNA hiện\b/i,
+  /\bmô tả này chỉ tập trung\b/i
+];
+
 type RawAiProductSeoResult = {
   seoTitle?: unknown;
   metaDescription?: unknown;
@@ -196,6 +210,8 @@ export async function generateProductSeoMarketing(input: ProductSeoMarketingInpu
         "- Không viết giá bán, ISBN, mã sản phẩm, SKU, ngày phát hành hoặc năm phát hành trong phần AI.",
         "- Không tự viết phần Thông tin xuất bản. Code sẽ tự render phần này từ metadata Sapo.",
         "- Nếu Book DNA có foreignPraiseQuotes, phải đưa toàn bộ lời khen đã dịch vào phần Giới thiệu sách, có ghi nguồn.",
+        "- Không nhắc tới nguồn nội bộ/quy trình như: \"Theo mô tả sản phẩm\", \"Theo dữ liệu sản phẩm\", \"Nguồn: mô tả sản phẩm\", \"Book DNA hiện...\", \"mô tả này chỉ tập trung...\".",
+        "- Viết như nội dung xuất bản sạch trên website, không giải thích rằng mình đang thiếu dữ liệu hoặc đang dựa vào Book DNA.",
         "",
         "Cấu trúc HTML AI được phép viết:",
         "- h2 Giới thiệu sách",
@@ -330,8 +346,13 @@ function normalizeAiResult(result: RawAiProductSeoResult, input: ProductSeoMarke
   const validationWarnings: string[] = [];
   const seoTitle = readRequiredString(result.seoTitle, "seoTitle").slice(0, 70);
   const metaDescription = readRequiredString(result.metaDescription, "metaDescription").slice(0, 170);
-  let productDescriptionHtml = validateHtml(
+  let productDescriptionHtml = cleanProcessLanguageHtml(
     sanitizeProductDescriptionHtml(readRequiredString(result.productDescriptionHtml, "productDescriptionHtml")),
+    "productDescriptionHtml",
+    validationWarnings
+  );
+  productDescriptionHtml = validateHtml(
+    productDescriptionHtml,
     "productDescriptionHtml",
     { aiContent: true, minTextLength: MIN_BLOCK_TEXT_LENGTH, warnings: validationWarnings }
   );
@@ -350,8 +371,13 @@ function normalizeAiResult(result: RawAiProductSeoResult, input: ProductSeoMarke
   );
   validateForeignPraiseIncluded(productDescriptionHtml, input.bookDNA.foreignPraiseQuotes ?? []);
 
-  let marketingBlocksHtml = validateHtml(
+  let marketingBlocksHtml = cleanProcessLanguageHtml(
     sanitizeProductDescriptionHtml(readRequiredString(result.marketingBlocksHtml, "marketingBlocksHtml")),
+    "marketingBlocksHtml",
+    validationWarnings
+  );
+  marketingBlocksHtml = validateHtml(
+    marketingBlocksHtml,
     "marketingBlocksHtml",
     { aiContent: true, minTextLength: MIN_BLOCK_TEXT_LENGTH, warnings: validationWarnings }
   );
@@ -644,6 +670,43 @@ export function sanitizeProductDescriptionHtml(html: string): string {
 
       return fullTag.startsWith("</") ? `</${normalizedTag}>` : `<${normalizedTag}>`;
     });
+}
+
+function cleanProcessLanguageHtml(html: string, fieldName: string, warnings: string[]): string {
+  let removedCount = 0;
+  let cleaned = html.replace(/<(p|li)>([\s\S]*?)<\/\1>/gi, (fullMatch, tagName: string, innerHtml: string) => {
+    const cleanedInnerHtml = removeInlineProcessLanguage(innerHtml).trim();
+    const plainText = stripHtml(cleanedInnerHtml);
+
+    if (!plainText || hasProcessLanguage(plainText)) {
+      removedCount += 1;
+      return "";
+    }
+
+    return `<${tagName.toLowerCase()}>${cleanedInnerHtml}</${tagName.toLowerCase()}>`;
+  });
+
+  cleaned = removeInlineProcessLanguage(cleaned);
+
+  if (removedCount > 0 || cleaned !== html) {
+    warnings.push(`Bot đã xóa ${removedCount || "một số"} câu/ghi chú quy trình khỏi ${fieldName}.`);
+  }
+
+  return cleaned;
+}
+
+function removeInlineProcessLanguage(html: string): string {
+  return html
+    .replace(/\s*\(Nguồn:\s*mô tả sản phẩm\)\s*/gi, " ")
+    .replace(/\s*\(Nguồn:\s*Book DNA\)\s*/gi, " ")
+    .replace(/\s*\(Nguồn:\s*dữ liệu sản phẩm\)\s*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasProcessLanguage(text: string): boolean {
+  const normalized = text.trim();
+  return PROCESS_LANGUAGE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function validateHtml(
