@@ -12,6 +12,7 @@ const preparationJobs = new Map<string, ProductSeoPreparationJob>();
 const enrichmentWaitByUser = new Map<number, string>();
 const preparationWaitByUser = new Map<number, string>();
 const formatDescriptionWaitByUser = new Map<number, string>();
+const formatDescriptionModeByUser = new Map<number, "replace" | "append">();
 
 function isExpired(createdAt: number): boolean {
   return Date.now() - createdAt > PRODUCT_SEO_JOB_TTL_MS;
@@ -32,6 +33,7 @@ function pruneExpiredJobs(): void {
       }
       if (formatDescriptionWaitByUser.get(job.userId) === jobId) {
         formatDescriptionWaitByUser.delete(job.userId);
+        formatDescriptionModeByUser.delete(job.userId);
       }
     }
   }
@@ -77,6 +79,7 @@ export function deleteDetectedProductUrlJob(jobId: string): void {
   }
   if (job && formatDescriptionWaitByUser.get(job.userId) === jobId) {
     formatDescriptionWaitByUser.delete(job.userId);
+    formatDescriptionModeByUser.delete(job.userId);
   }
 }
 
@@ -132,9 +135,10 @@ export function setProductSeoPreparationWait(userId: number, jobId: string): voi
   preparationWaitByUser.set(userId, jobId);
 }
 
-export function setProductSeoFormatDescriptionWait(userId: number, jobId: string): void {
+export function setProductSeoFormatDescriptionWait(userId: number, jobId: string, mode: "replace" | "append" = "replace"): void {
   pruneExpiredJobs();
   formatDescriptionWaitByUser.set(userId, jobId);
+  formatDescriptionModeByUser.set(userId, mode);
 }
 
 export function getProductSeoPreparationWait(userId: number): ProductSeoPreparationJob | null {
@@ -163,10 +167,14 @@ export function getProductSeoFormatDescriptionWait(userId: number): ProductSeoPr
   const job = preparationJobs.get(jobId);
   if (!job || job.userId !== userId) {
     formatDescriptionWaitByUser.delete(userId);
+    formatDescriptionModeByUser.delete(userId);
     return null;
   }
 
-  return job;
+  return {
+    ...job,
+    formatMode: formatDescriptionModeByUser.get(userId) ?? "replace"
+  };
 }
 
 export function clearProductSeoPreparationWait(userId: number): void {
@@ -175,6 +183,7 @@ export function clearProductSeoPreparationWait(userId: number): void {
 
 export function clearProductSeoFormatDescriptionWait(userId: number): void {
   formatDescriptionWaitByUser.delete(userId);
+  formatDescriptionModeByUser.delete(userId);
 }
 
 export function getProductSeoEnrichmentWait(userId: number): ProductSeoBookUnderstandingJob | null {

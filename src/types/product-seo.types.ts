@@ -109,6 +109,7 @@ export type ProductSeoPreparationJob = {
   jobId: string;
   userId: number;
   alias: string;
+  formatMode?: "replace" | "append";
   createdAt: number;
 };
 

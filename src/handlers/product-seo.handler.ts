@@ -175,6 +175,8 @@ function buildActionButtons(jobId: string): InlineKeyboardButton[][] {
 
 function buildPreparationButtons(jobId: string): InlineKeyboardButton[][] {
   return [
+    [{ text: "Viết lại hoàn toàn", callback_data: `seo_replace:${jobId}` }],
+    [{ text: "Bổ sung", callback_data: `seo_supplement:${jobId}` }],
     [{ text: "Hủy", callback_data: `seo_cancel_detect:${jobId}` }]
   ];
 }
@@ -243,20 +245,18 @@ function buildBookDnaMessage(job: ProductSeoBookUnderstandingJob): string {
 
 async function startProductSeoPreparation(ctx: Context, userId: number, alias: string): Promise<void> {
   const job = saveDetectedProductUrlJob({ userId, alias });
-  setProductSeoFormatDescriptionWait(userId, job.jobId);
   logger.info("product_url_detected", { userId, jobId: job.jobId, alias });
   await replyWithButtonsSafely(
     ctx,
     [
       "Đã nhận URL sản phẩm Nhã Nam.",
       "",
-      "Bạn gửi nội dung mô tả mới cho sản phẩm này nhé.",
+      "Bạn muốn xử lý mô tả theo cách nào?",
       "",
-      "Bot sẽ chỉ dùng AI để format HTML thông minh, không phân tích, không tự viết thêm và không cập nhật Sapo trước khi bạn xác nhận.",
+      "Viết lại hoàn toàn: bạn nhập nội dung mới, bot format rồi hỏi cập nhật thay thế mô tả hiện tại.",
+      "Bổ sung: bạn nhập phần cần thêm, bot nối với mô tả hiện tại trên Sapo rồi format lại HTML.",
       "",
-      "Có thể gửi nhiều tin nhắn liên tiếp; bot sẽ nối lại rồi format một lần.",
-      "",
-      "Quy tắc format: tên sách in đậm, tên tác giả in nghiêng, praise tách thành lời khen in nghiêng và nguồn praise căn phải in đậm."
+      "Bot chỉ dùng AI để format HTML thông minh, không cập nhật Sapo trước khi bạn xác nhận."
     ].join("\n"),
     buildPreparationButtons(job.jobId),
     { userId, jobId: job.jobId, alias }
@@ -346,10 +346,17 @@ async function formatSubmittedProductDescriptionByAlias(
   ctx: Context,
   userId: number,
   alias: string,
-  submittedDescriptionText: string
+  submittedDescriptionText: string,
+  formatMode: "replace" | "append" = "replace"
 ): Promise<void> {
-  logger.info("product_alias_extracted", { userId, alias, mode: "format_submitted_description" });
-  await replySafely(ctx, "Đang dùng AI format mô tả bạn vừa gửi. Bot không tự viết thêm nội dung.", { userId, alias });
+  logger.info("product_alias_extracted", { userId, alias, mode: "format_submitted_description", formatMode });
+  await replySafely(
+    ctx,
+    formatMode === "append"
+      ? "Đang lấy mô tả hiện tại, nối phần bổ sung và dùng AI format lại HTML."
+      : "Đang dùng AI format mô tả bạn vừa gửi. Bot không tự viết thêm nội dung.",
+    { userId, alias, formatMode }
+  );
 
   const product = await sapoProductService.findProductByAlias(alias);
   if (!product || !product.id || !product.title) {
@@ -372,12 +379,17 @@ async function formatSubmittedProductDescriptionByAlias(
     issues: [],
     opportunities: []
   };
-  const formattedResult = await smartFormatSubmittedProductDescription(product, submittedDescriptionText);
+  const supplementInput = buildFormatDescriptionInput(product, submittedDescriptionText, formatMode);
+  const formattedResult = await smartFormatSubmittedProductDescription(product, supplementInput.sourceText);
+  if (supplementInput.warning) {
+    formattedResult.warnings.push(supplementInput.warning);
+  }
   logger.info("ai_product_description_formatted", {
     userId,
     productId: product.id,
     alias,
-    mode: "format_submitted_description"
+    mode: "format_submitted_description",
+    formatMode
   });
 
   const updateJob: ProductSeoPendingJob = {
@@ -410,7 +422,8 @@ async function formatSubmittedProductDescriptionByAlias(
     jobId: updateJob.jobId,
     productId: updateJob.productId,
     alias: updateJob.productAlias,
-    mode: "format_submitted_description"
+    mode: "format_submitted_description",
+    formatMode
   });
   await replyWithButtonsSafely(ctx, buildPreviewMessage(updateJob), buildActionButtons(updateJob.jobId), {
     userId,
@@ -418,6 +431,29 @@ async function formatSubmittedProductDescriptionByAlias(
     productId: updateJob.productId,
     alias: updateJob.productAlias
   });
+}
+
+function buildFormatDescriptionInput(
+  product: { content?: string; summary?: string },
+  submittedDescriptionText: string,
+  formatMode: "replace" | "append"
+): { sourceText: string; warning?: string } {
+  const submittedText = submittedDescriptionText.trim();
+  if (formatMode !== "append") {
+    return { sourceText: submittedText };
+  }
+
+  const currentText = stripHtml(product.content || product.summary || "").trim();
+  if (!currentText) {
+    return {
+      sourceText: submittedText,
+      warning: "Không thấy mô tả hiện tại trên Sapo nên bot chỉ format phần bổ sung bạn gửi."
+    };
+  }
+
+  return {
+    sourceText: [currentText, submittedText].filter(Boolean).join("\n\n")
+  };
 }
 
 function createFormatOnlyBookDNA(title: string): BookDNA {
@@ -704,6 +740,7 @@ function bufferProductSeoFormatDescriptionInput(
     userId,
     jobId: job.jobId,
     alias: job.alias,
+    formatMode: job.formatMode ?? "replace",
     parts: parts.length
   });
 }
@@ -729,7 +766,7 @@ async function processBufferedProductSeoFormatDescription(userId: number): Promi
   deleteDetectedProductUrlJob(job.jobId);
 
   try {
-    await formatSubmittedProductDescriptionByAlias(buffered.ctx, userId, job.alias, combinedText);
+    await formatSubmittedProductDescriptionByAlias(buffered.ctx, userId, job.alias, combinedText, job.formatMode ?? "replace");
   } catch (error) {
     const reason = formatFriendlyError(error);
     logger.error("product_seo_update_failed", {
@@ -737,7 +774,8 @@ async function processBufferedProductSeoFormatDescription(userId: number): Promi
       jobId: job.jobId,
       alias: job.alias,
       reason,
-      mode: "format_submitted_description"
+      mode: "format_submitted_description",
+      formatMode: job.formatMode ?? "replace"
     });
     await replySafely(buffered.ctx, `Không format được mô tả mới: ${reason}`, { userId, jobId: job.jobId, alias: job.alias });
   }
@@ -940,24 +978,31 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
     return;
   }
 
-  if (action === "seo_auto_write") {
+  if (action === "seo_replace" || action === "seo_supplement" || action === "seo_auto_write") {
     const detectedJob = getDetectedProductUrlJob(jobId, userId);
     if (!detectedJob) {
       await replySafely(ctx, "Job xác nhận đã hết hạn hoặc không thuộc user này.", { userId, jobId });
       return;
     }
 
-    setProductSeoFormatDescriptionWait(userId, jobId);
+    const formatMode = action === "seo_supplement" ? "append" : "replace";
+    setProductSeoFormatDescriptionWait(userId, jobId, formatMode);
     await replySafely(
       ctx,
       [
-        "Bạn gửi mô tả mới cho sản phẩm này nhé.",
+        formatMode === "append"
+          ? "Bạn gửi phần nội dung muốn bổ sung cho sản phẩm này nhé."
+          : "Bạn gửi mô tả mới cho sản phẩm này nhé.",
         "",
-        "Bot sẽ chỉ dùng AI để format HTML thông minh, không phân tích và không tự viết thêm nội dung.",
+        formatMode === "append"
+          ? "Bot sẽ nối phần này với mô tả hiện tại trên Sapo rồi dùng AI format lại HTML."
+          : "Bot sẽ dùng AI format HTML thông minh và thay thế mô tả hiện tại sau khi bạn xác nhận.",
         "",
-        "Có thể gửi nhiều tin nhắn liên tiếp; bot sẽ nối lại rồi phản hồi một lần."
+        "Có thể gửi nhiều tin nhắn liên tiếp; bot sẽ nối lại rồi phản hồi một lần.",
+        "",
+        "Quy tắc format: tên sách in đậm, tên tác giả in nghiêng, praise tách thành lời khen in nghiêng và nguồn praise căn phải in đậm."
       ].join("\n"),
-      { userId, jobId, alias: detectedJob.alias }
+      { userId, jobId, alias: detectedJob.alias, formatMode }
     );
     return;
   }
@@ -997,33 +1042,6 @@ export async function handleProductSeoCallback(ctx: Context): Promise<void> {
       logger.error("product_seo_update_failed", { userId, jobId, alias: detectedJob.alias, reason });
       await replySafely(ctx, `Không tối ưu được sản phẩm: ${reason}`, { userId, jobId });
     }
-    return;
-  }
-
-  if (action === "seo_auto_write") {
-    const detectedJob = getDetectedProductUrlJob(jobId, userId);
-    if (!detectedJob) {
-      await replySafely(ctx, "Job xác nhận đã hết hạn hoặc không thuộc user này.", { userId, jobId });
-      return;
-    }
-
-    setProductSeoFormatDescriptionWait(userId, jobId);
-    await replySafely(
-      ctx,
-      [
-        "Bạn gửi mô tả mới cho sản phẩm này nhé.",
-        "",
-        "Có thể gửi nhiều tin nhắn liên tiếp; bot sẽ nối lại rồi phản hồi một lần.",
-        "",
-        "Bot chỉ format text bạn gửi vào cấu trúc:",
-        "- Giới thiệu sách",
-        "- Cuốn sách này dành cho ai, nếu trong text có phần này",
-        "- Thông tin xuất bản, lấy từ metadata Sapo",
-        "",
-        "Bot không viết lại, không thêm ý và không sửa câu chữ của bạn."
-      ].join("\n"),
-      { userId, jobId, alias: detectedJob.alias }
-    );
     return;
   }
 
