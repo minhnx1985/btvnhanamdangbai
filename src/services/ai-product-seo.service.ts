@@ -380,6 +380,7 @@ export async function smartFormatSubmittedProductDescription(
         "- Chuyển danh sách thành ul/ol/li nếu người dùng đã viết theo dạng danh sách hoặc từng dòng.",
         "- In đậm tên sách bằng strong.",
         "- In nghiêng tên tác giả bằng em.",
+        "- Nếu có URL ảnh trực tiếp (.jpg, .jpeg, .png, .webp, .gif), chuyển URL đó thành <p><img src=\"URL\" alt=\"\" /></p> và giữ đúng vị trí trong nội dung.",
         "",
         "Quy tắc praise/review:",
         "- Nếu có lời khen/praise/review dạng trích dẫn, đặt phần lời khen trong một đoạn riêng: <p><em>praise text</em></p>.",
@@ -388,12 +389,13 @@ export async function smartFormatSubmittedProductDescription(
         "- Không tự đoán nguồn praise nếu text không có nguồn.",
         "",
         "HTML được dùng:",
-        "- h2, h3, p, strong, em, blockquote, ul, ol, li.",
+        "- h2, h3, p, strong, em, blockquote, ul, ol, li, img.",
         "- Riêng p nguồn praise được dùng style đúng y hệt: style=\"text-align: right;\".",
+        "- Riêng img chỉ được dùng src là URL ảnh trực tiếp từ nội dung người dùng và alt rỗng.",
         "",
         "Không dùng:",
         "- markdown.",
-        "- img, iframe, script, a.",
+        "- iframe, script, a.",
         "- class, id, data attribute.",
         "- inline style khác ngoài text-align right cho nguồn praise.",
         "",
@@ -426,14 +428,15 @@ export async function smartFormatSubmittedProductDescription(
     ? result.warnings.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)
     : [];
   const formattedHtml = validateHtml(
-    sanitizeSmartFormattedDescriptionHtml(readRequiredString(result.finalBodyHtml, "finalBodyHtml")),
+    convertStandaloneImageUrlParagraphs(sanitizeSmartFormattedDescriptionHtml(readRequiredString(result.finalBodyHtml, "finalBodyHtml"))),
     "finalBodyHtml",
-    { checkForbiddenFiller: false, allowInlineStyles: true }
+    { checkForbiddenFiller: false, allowInlineStyles: true, allowImages: true }
   );
   const structuredHtml = enforceAudienceSectionsAsLists(formattedHtml, warnings);
   const finalBodyHtml = validateHtml(applyProductDescriptionSpacing(structuredHtml), "finalBodyHtml", {
     checkForbiddenFiller: false,
-    allowInlineStyles: true
+    allowInlineStyles: true,
+    allowImages: true
   });
   const plainText = stripHtml(finalBodyHtml);
   const telegramPreview =
@@ -981,10 +984,13 @@ function sanitizeSmartFormattedDescriptionHtml(html: string): string {
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
-    .replace(/<img[^>]*>/gi, "")
+    .replace(/<img\b[^>]*>/gi, (tag) => {
+      const imageUrl = readImageSrc(tag);
+      return imageUrl ? renderImageTag(imageUrl) : "";
+    })
     .replace(/<a\b[\s\S]*?>/gi, "")
     .replace(/<\/a>/gi, "")
-    .replace(/<\/?([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?>/g, (fullTag, tagName: string) => {
+    .replace(/<\/?(?!img\b)([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?>/g, (fullTag, tagName: string) => {
       const normalizedTag = tagName.toLowerCase();
       if (!ALLOWED_HTML_TAGS.has(normalizedTag)) {
         return "";
@@ -1000,6 +1006,31 @@ function sanitizeSmartFormattedDescriptionHtml(html: string): string {
 
       return `<${normalizedTag}>`;
     });
+}
+
+function convertStandaloneImageUrlParagraphs(html: string): string {
+  return html.replace(/<p>([\s\S]*?)<\/p>/gi, (match, innerHtml: string) => {
+    const text = decodeBasicHtmlEntities(stripHtml(innerHtml)).trim();
+    return isDirectImageUrl(text) ? `<p>${renderImageTag(text)}</p>` : match;
+  });
+}
+
+function readImageSrc(tag: string): string | null {
+  const match = tag.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+  if (!match) {
+    return null;
+  }
+
+  const decodedSrc = decodeBasicHtmlEntities(match[1]).trim();
+  return isDirectImageUrl(decodedSrc) ? decodedSrc : null;
+}
+
+function renderImageTag(src: string): string {
+  return `<img src="${escapeHtml(src)}" alt="" />`;
+}
+
+function isDirectImageUrl(value: string): boolean {
+  return /^https?:\/\/[^\s"'<>]+\.(?:jpe?g|png|webp|gif)(?:\?[^\s"'<>]*)?$/i.test(value.trim());
 }
 
 function applyProductDescriptionSpacing(html: string): string {
@@ -1084,6 +1115,7 @@ function validateHtml(
     warnings?: string[];
     checkForbiddenFiller?: boolean;
     allowInlineStyles?: boolean;
+    allowImages?: boolean;
   } = {}
 ): string {
   const plainText = stripHtml(html);
@@ -1092,12 +1124,16 @@ function validateHtml(
     throw new AppError(`HTML sau sanitize rỗng hoặc quá ngắn: ${fieldName}`, "AI_PRODUCT_SEO_HTML_TOO_SHORT");
   }
 
-  if (/<script|<iframe|<img/i.test(html) || (!options.allowInlineStyles && /style=/i.test(html))) {
+  if (/<script|<iframe/i.test(html) || (!options.allowImages && /<img/i.test(html)) || (!options.allowInlineStyles && /style=/i.test(html))) {
     throw new AppError(`HTML sau sanitize còn chứa tag/attribute không hợp lệ: ${fieldName}`, "AI_PRODUCT_SEO_UNSAFE_HTML");
   }
 
   if (options.allowInlineStyles && hasUnsafeInlineStyle(html)) {
     throw new AppError(`HTML sau sanitize còn chứa style không hợp lệ: ${fieldName}`, "AI_PRODUCT_SEO_UNSAFE_HTML");
+  }
+
+  if (options.allowImages && hasUnsafeImageTag(html)) {
+    throw new AppError(`HTML sau sanitize còn chứa ảnh không hợp lệ: ${fieldName}`, "AI_PRODUCT_SEO_UNSAFE_HTML");
   }
 
   const normalizedText = normalizeForQualityCheck(plainText);
@@ -1136,6 +1172,15 @@ function hasUnsafeInlineStyle(html: string): boolean {
   ]);
   const matches = Array.from(html.matchAll(/\sstyle="([^"]*)"/gi));
   return matches.some((match) => !allowedStyles.has(normalizeInlineStyle(match[1])));
+}
+
+function hasUnsafeImageTag(html: string): boolean {
+  const matches = Array.from(html.matchAll(/<img\b[^>]*>/gi));
+  return matches.some((match) => {
+    const tag = match[0];
+    const src = readImageSrc(tag);
+    return !src || tag !== renderImageTag(src);
+  });
 }
 
 function normalizeInlineStyle(style: string): string {
