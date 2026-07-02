@@ -15,7 +15,7 @@ import { logger } from "../utils/logger";
 type ArticlePayload = {
   article: {
     title: string;
-    published_on: null;
+    published_on: string | null;
     content?: string;
     tags?: string;
     template_layout?: string;
@@ -30,6 +30,9 @@ type SapoArticleResponse = {
     id: number | string;
     title: string;
     content?: string;
+    handle?: string;
+    alias?: string;
+    url?: string;
     image?: {
       src?: string;
     };
@@ -45,7 +48,7 @@ const productMessages = {
 
 class SapoService {
   private readonly client: AxiosInstance;
-  private readonly blogIdCache = new Map<string, number>();
+  private readonly blogCache = new Map<string, SapoBlog>();
 
   constructor() {
     this.client = axios.create({
@@ -63,34 +66,21 @@ class SapoService {
   }
 
   async getBlogIdByName(blogName: string): Promise<number> {
-    const cached = this.blogIdCache.get(blogName);
-    if (cached) {
-      return cached;
-    }
-
-    const blogs = await this.fetchBlogs();
-    const blog = blogs.find((item) => this.getBlogName(item) === blogName);
-
-    if (!blog) {
-      throw new AppError("Không tìm thấy blog mặc định trên Sapo", "SAPO_BLOG_NOT_FOUND");
-    }
-
-    this.blogIdCache.set(blogName, blog.id);
-    return blog.id;
+    return (await this.getBlogByName(blogName)).id;
   }
 
   async createDraftArticle(input: CreateDraftArticleInput): Promise<CreateDraftArticleResult> {
     const blogName = input.blogName ?? config.sapoDefaultBlogName;
-    let blogId = await this.getBlogIdByName(blogName);
+    let blog = await this.getBlogByName(blogName);
 
     try {
-      return await this.createDraftArticleByBlogId(blogId, input);
+      return await this.createDraftArticleByBlog(blog, input);
     } catch (error) {
       if (this.shouldRetryWithFreshBlog(error)) {
         logger.warn("Sapo create article hit 404, refreshing cached blog id", { blogName });
-        this.blogIdCache.delete(blogName);
-        blogId = await this.getBlogIdByName(blogName);
-        return this.createDraftArticleByBlogId(blogId, input);
+        this.blogCache.delete(blogName);
+        blog = await this.getBlogByName(blogName);
+        return this.createDraftArticleByBlog(blog, input);
       }
 
       throw this.mapSapoError(error);
@@ -127,6 +117,23 @@ class SapoService {
     } catch (error) {
       throw this.mapSapoError(error);
     }
+  }
+
+  private async getBlogByName(blogName: string): Promise<SapoBlog> {
+    const cached = this.blogCache.get(blogName);
+    if (cached) {
+      return cached;
+    }
+
+    const blogs = await this.fetchBlogs();
+    const blog = blogs.find((item) => this.getBlogName(item) === blogName);
+
+    if (!blog) {
+      throw new AppError("Không tìm thấy blog mặc định trên Sapo", "SAPO_BLOG_NOT_FOUND");
+    }
+
+    this.blogCache.set(blogName, blog);
+    return blog;
   }
 
   private async getProductByAlias(alias: string): Promise<SapoProduct> {
@@ -197,6 +204,10 @@ class SapoService {
     return { base64 };
   }
 
+  private getPublishedOn(input: CreateDraftArticleInput): string | null {
+    return input.publish ? new Date().toISOString() : null;
+  }
+
   private buildCreatePayload(input: CreateDraftArticleInput): ArticlePayload {
     return {
       article: {
@@ -204,7 +215,7 @@ class SapoService {
         content: input.content,
         tags: input.tags,
         template_layout: input.templateLayout,
-        published_on: null
+        published_on: this.getPublishedOn(input)
       }
     };
   }
@@ -216,28 +227,35 @@ class SapoService {
         content,
         tags: input.tags,
         template_layout: input.templateLayout,
-        published_on: null,
+        published_on: this.getPublishedOn(input),
         image: this.buildImageWithRawBase64(imageBase64)
       }
     };
   }
 
-  private async createDraftArticleByBlogId(
-    blogId: number,
+  private async createDraftArticleByBlog(
+    blog: SapoBlog,
     input: CreateDraftArticleInput
   ): Promise<CreateDraftArticleResult> {
+    const blogId = blog.id;
     const createdArticle = await this.createArticleRecord(blogId, input);
     const updatedArticle = await this.attachFeatureImage(blogId, createdArticle.id, input, createdArticle.image?.src);
     const imageSrc = updatedArticle.image?.src ?? createdArticle.image?.src;
+    let finalArticle = this.mergeArticleResponse(createdArticle, updatedArticle);
 
     if (imageSrc && input.prependFeatureImageInContent !== false) {
-      await this.updateArticleContentWithFeatureImage(blogId, createdArticle.id, input, imageSrc);
+      finalArticle = this.mergeArticleResponse(
+        finalArticle,
+        await this.updateArticleContentWithFeatureImage(blogId, createdArticle.id, input, imageSrc)
+      );
     }
 
     return {
       id: createdArticle.id,
       title: createdArticle.title,
-      imageSrc
+      imageSrc,
+      url: this.buildArticleUrl(finalArticle, blog),
+      published: input.publish === true
     };
   }
 
@@ -269,16 +287,52 @@ class SapoService {
     articleId: number | string,
     input: CreateDraftArticleInput,
     imageSrc: string
-  ): Promise<void> {
-    await this.client.put<SapoArticleResponse>(`/admin/blogs/${blogId}/articles/${articleId}.json`, {
+  ): Promise<SapoArticleResponse["article"]> {
+    const response = await this.client.put<SapoArticleResponse>(`/admin/blogs/${blogId}/articles/${articleId}.json`, {
       article: {
         title: input.title,
         content: prependImageUrlToHtml(input.content, imageSrc),
         tags: input.tags,
         template_layout: input.templateLayout,
-        published_on: null
+        published_on: this.getPublishedOn(input)
       }
     });
+    return {
+      ...response.data.article,
+      image: response.data.article.image?.src ? response.data.article.image : { src: imageSrc }
+    };
+  }
+
+  private buildArticleUrl(article: SapoArticleResponse["article"], blog: SapoBlog): string | undefined {
+    if (article.url?.startsWith("http")) {
+      return article.url;
+    }
+
+    if (article.url?.startsWith("/")) {
+      return `https://${config.sapoProductUrlHost}${article.url}`;
+    }
+
+    const articleHandle = article.handle ?? article.alias;
+    const blogHandle = blog.handle ?? blog.alias;
+    if (!articleHandle || !blogHandle) {
+      return undefined;
+    }
+
+    return `https://${config.sapoProductUrlHost}/blogs/${blogHandle}/${articleHandle}`;
+  }
+
+  private mergeArticleResponse(
+    base: SapoArticleResponse["article"],
+    next: SapoArticleResponse["article"]
+  ): SapoArticleResponse["article"] {
+    return {
+      ...base,
+      ...next,
+      handle: next.handle ?? base.handle,
+      alias: next.alias ?? base.alias,
+      url: next.url ?? base.url,
+      image: next.image?.src ? next.image : base.image
+    };
   }
 
   private shouldRetryWithFreshBlog(error: unknown): boolean {

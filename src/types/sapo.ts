@@ -2,6 +2,8 @@ export type SapoBlog = {
   id: number;
   title: string;
   name?: string;
+  handle?: string;
+  alias?: string;
 };
 
 export type LinkedProduct = {
@@ -24,12 +26,15 @@ export type CreateDraftArticleInput = {
   blogName?: string;
   templateLayout?: string;
   prependFeatureImageInContent?: boolean;
+  publish?: boolean;
 };
 
 export type CreateDraftArticleResult = {
   id: number | string;
   title: string;
   imageSrc?: string;
+  url?: string;
+  published?: boolean;
 };
 
 export type SapoProduct = {

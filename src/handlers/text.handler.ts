@@ -1,4 +1,5 @@
 import { Context } from "telegraf";
+import { PRODUCT_EDITOR_TELEGRAM_USER_ID } from "../bot/guards";
 import { config } from "../config/env";
 import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
@@ -80,7 +81,12 @@ export async function submitDraftPost(
   userId: number,
   input: DraftSubmissionInput
 ): Promise<void> {
-  await replySafely(ctx, messages.submitting, { userId, postType: input.postType });
+  const shouldPublishImmediately = userId === PRODUCT_EDITOR_TELEGRAM_USER_ID;
+  await replySafely(
+    ctx,
+    shouldPublishImmediately ? "Đang đăng bài..." : messages.submitting,
+    { userId, postType: input.postType, publish: shouldPublishImmediately }
+  );
 
   const isAuthorPost = input.postType === "author";
   const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
@@ -100,21 +106,23 @@ export async function submitDraftPost(
       tags,
       blogName,
       templateLayout: isAuthorPost ? config.sapoAuthorTemplateLayout : undefined,
-      prependFeatureImageInContent: !isAuthorPost
+      prependFeatureImageInContent: !isAuthorPost,
+      publish: shouldPublishImmediately
     });
 
-    logger.info("create draft success", {
+    logger.info(shouldPublishImmediately ? "publish article success" : "create draft success", {
       userId,
       articleId: result.id,
       title: result.title,
       postType: input.postType,
       tags: tags ?? "",
-      linkedProducts: input.linkedProducts?.length ?? 0
+      linkedProducts: input.linkedProducts?.length ?? 0,
+      url: result.url ?? ""
     });
     resetSession(userId);
 
     const lines = [
-      "✅ Đã tạo bài nháp thành công",
+      shouldPublishImmediately ? "✅ Đã đăng bài thành công" : "✅ Đã tạo bài nháp thành công",
       `- Tiêu đề: ${result.title}`,
       `- Blog: ${blogName}`,
       `- Article ID: ${result.id}`
@@ -124,12 +132,24 @@ export async function submitDraftPost(
       lines.push(`- Tag: ${tags}`);
     }
 
-    await replySafely(ctx, lines.join("\n"), { userId, postType: input.postType, articleId: result.id });
+    if (shouldPublishImmediately) {
+      lines.push(result.url ? `- Link: ${result.url}` : "- Link: Sapo chưa trả handle/url để dựng link công khai.");
+    }
+
+    await replySafely(ctx, lines.join("\n"), { userId, postType: input.postType, articleId: result.id, url: result.url ?? "" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lỗi hệ thống, vui lòng thử lại";
-    logger.error("create draft fail", { userId, reason: message, postType: input.postType });
+    logger.error(shouldPublishImmediately ? "publish article fail" : "create draft fail", {
+      userId,
+      reason: message,
+      postType: input.postType
+    });
     resetSession(userId);
-    await replySafely(ctx, `❌ Tạo bài nháp thất bại: ${message}`, { userId, postType: input.postType });
+    await replySafely(
+      ctx,
+      shouldPublishImmediately ? `❌ Đăng bài thất bại: ${message}` : `❌ Tạo bài nháp thất bại: ${message}`,
+      { userId, postType: input.postType }
+    );
   }
 }
 
