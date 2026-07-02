@@ -303,22 +303,26 @@ class SapoService {
     };
   }
 
-  private buildArticleUrl(article: SapoArticleResponse["article"], blog: SapoBlog): string | undefined {
+  private buildArticleUrl(article: SapoArticleResponse["article"], _blog: SapoBlog): string | undefined {
     if (article.url?.startsWith("http")) {
       return article.url;
     }
 
     if (article.url?.startsWith("/")) {
-      return `https://${config.sapoProductUrlHost}${article.url}`;
+      const handleFromUrl = article.url
+        .split("/")
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .pop();
+      return handleFromUrl ? `https://${config.sapoProductUrlHost}/${handleFromUrl}` : undefined;
     }
 
     const articleHandle = article.handle ?? article.alias;
-    const blogHandle = blog.handle ?? blog.alias;
-    if (!articleHandle || !blogHandle) {
+    if (!articleHandle) {
       return undefined;
     }
 
-    return `https://${config.sapoProductUrlHost}/blogs/${blogHandle}/${articleHandle}`;
+    return `https://${config.sapoProductUrlHost}/${articleHandle}`;
   }
 
   private mergeArticleResponse(
