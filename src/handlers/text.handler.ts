@@ -4,6 +4,7 @@ import { config } from "../config/env";
 import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { plainTextToHtml } from "../services/content.service";
+import { detectDraftIntake } from "../services/draft-intake.service";
 import { sapoService } from "../services/sapo.service";
 import { shopApiService } from "../services/shopapi.service";
 import { LinkedProduct } from "../types/sapo";
@@ -183,12 +184,33 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
     }
 
     if (session.state === "waiting_title") {
+      const intake = await detectDraftIntake(text);
+
+      if (intake.kind === "title") {
+        setSession(userId, {
+          state: "waiting_content",
+          postType: session.postType ?? "blog",
+          title: intake.title
+        });
+        await replySafely(ctx, messages.askContent, { userId });
+        return;
+      }
+
       setSession(userId, {
         state: "waiting_content",
         postType: session.postType ?? "blog",
-        title: text
+        title: intake.title,
+        content: intake.content
       });
-      await replySafely(ctx, messages.askContent, { userId });
+      await replySafely(
+        ctx,
+        [
+          `Đã nhận bài và tự nhận diện tiêu đề: ${intake.title}`,
+          "",
+          "Bạn có thể gửi thêm nội dung hoặc gửi ảnh feature để sang bước tiếp theo."
+        ].join("\n"),
+        { userId, draftTitleDetection: intake.source }
+      );
       return;
     }
 
