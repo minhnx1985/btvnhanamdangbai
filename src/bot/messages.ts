@@ -5,6 +5,7 @@ export const messages = {
     "",
     "Lệnh hỗ trợ:",
     "- /newpost: tạo bài blog thường",
+    "- /blog: tạo bài vào danh mục Blog",
     "- /author: tạo bài ở mục Tác giả",
     "- /seo <url>: tối ưu SEO & marketing cho sản phẩm Nhã Nam",
     "- /cancel: hủy thao tác hiện tại",
@@ -22,8 +23,9 @@ export const messages = {
     "3. Gửi ảnh feature",
     "4. Bot tự tạo từ khóa và tạo bài nháp ở mục Tác giả"
   ].join("\n"),
-  genericStartFlow: "Gõ /newpost để tạo bài blog hoặc /author để tạo bài tác giả",
+  genericStartFlow: "Gõ /newpost để tạo bài Biên tập viên giới thiệu, /blog để tạo bài Blog, hoặc /author để tạo bài tác giả",
   askTitle: "Gửi tiêu đề bài viết, hoặc gửi nguyên bài dài để bot tự nhận diện tiêu đề.",
+  askBlogTitle: "Gửi tiêu đề bài viết cho danh mục Blog, hoặc gửi nguyên bài dài để bot tự nhận diện tiêu đề.",
   askAuthorTitle: "Gửi tiêu đề bài viết tác giả, hoặc gửi nguyên bài dài để bot tự nhận diện tiêu đề.",
   askContent: "Gửi nội dung bài viết. Bạn có thể gửi nhiều tin nhắn liên tiếp, xong thì gửi ảnh feature.",
   contentAppended: "Đã nhận thêm nội dung. Bạn có thể gửi tiếp hoặc gửi ảnh feature để sang bước tiếp theo.",
