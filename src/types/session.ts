@@ -8,7 +8,7 @@ export type SessionState =
   | "waiting_product_link"
   | "waiting_keywords";
 
-export type PostType = "blog" | "author";
+export type PostType = "blog" | "author" | "site_blog";
 
 export type PostSession = {
   state: SessionState;
