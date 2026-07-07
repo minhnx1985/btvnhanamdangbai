@@ -3,7 +3,7 @@ import { PRODUCT_EDITOR_TELEGRAM_USER_ID } from "../bot/guards";
 import { config } from "../config/env";
 import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
-import { plainTextToHtml } from "../services/content.service";
+import { formatArticleContentHtml } from "../services/content.service";
 import { detectDraftIntake } from "../services/draft-intake.service";
 import { sapoService } from "../services/sapo.service";
 import { shopApiService } from "../services/shopapi.service";
@@ -85,7 +85,7 @@ export async function submitDraftPost(
   const shouldPublishImmediately = userId === PRODUCT_EDITOR_TELEGRAM_USER_ID;
   await replySafely(
     ctx,
-    shouldPublishImmediately ? "Đang đăng bài..." : messages.submitting,
+    shouldPublishImmediately ? "Đang format và đăng bài..." : "Đang format và tạo bài nháp...",
     { userId, postType: input.postType, publish: shouldPublishImmediately }
   );
 
@@ -93,7 +93,10 @@ export async function submitDraftPost(
   const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
 
   try {
-    const contentHtml = plainTextToHtml(input.content, {
+    const contentHtml = await formatArticleContentHtml({
+      title: input.title,
+      content: input.content,
+      postType: input.postType,
       embedDirectImageLinks: !isAuthorPost,
       linkedProducts: isAuthorPost ? [] : input.linkedProducts ?? []
     });
