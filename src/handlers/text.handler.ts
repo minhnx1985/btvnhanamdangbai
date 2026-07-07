@@ -29,6 +29,18 @@ type DraftSubmissionInput = {
   linkedProducts?: LinkedProduct[];
 };
 
+function getSapoBlogName(postType: PostType): string {
+  if (postType === "author") {
+    return config.sapoAuthorBlogName;
+  }
+
+  if (postType === "site_blog") {
+    return config.sapoBlogBlogName;
+  }
+
+  return config.sapoDefaultBlogName;
+}
+
 function isSkipProductLinkInput(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return normalized === "bo qua" || normalized === "bỏ qua" || normalized === "skip";
@@ -90,7 +102,7 @@ export async function submitDraftPost(
   );
 
   const isAuthorPost = input.postType === "author";
-  const blogName = isAuthorPost ? config.sapoAuthorBlogName : config.sapoDefaultBlogName;
+  const blogName = getSapoBlogName(input.postType);
 
   try {
     const contentHtml = await formatArticleContentHtml({
@@ -243,18 +255,20 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       }
 
       if (isSkipProductLinkInput(text)) {
+        const postType = session.postType ?? "blog";
         await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
-          postType: "blog"
+          postType
         });
         return;
       }
 
       try {
         const resolvedProducts = await sapoService.resolveProductLinks(text);
+        const postType = session.postType ?? "blog";
         await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
@@ -262,18 +276,19 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
           imageMimeType: session.imageMimeType,
           tags: resolvedProducts.tag,
           linkedProducts: resolvedProducts.linkedProducts,
-          postType: "blog"
+          postType
         });
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Skip invalid product links";
         logger.warn("product link resolution failed", { userId, reason: message });
+        const postType = session.postType ?? "blog";
         await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
           imageBase64: session.imageBase64,
           imageMimeType: session.imageMimeType,
-          postType: "blog"
+          postType
         });
         return;
       }
@@ -287,6 +302,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       }
 
       if (isSkipKeywordsInput(text)) {
+        const postType = session.postType ?? "blog";
         await submitDraftPost(ctx, userId, {
           title: session.title,
           content: session.content,
@@ -294,12 +310,13 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
           imageMimeType: session.imageMimeType,
           tags: session.productTag,
           linkedProducts: session.linkedProducts,
-          postType: "blog"
+          postType
         });
         return;
       }
 
       const keywordTags = parseKeywordTags(text);
+      const postType = session.postType ?? "blog";
       await submitDraftPost(ctx, userId, {
         title: session.title,
         content: session.content,
@@ -307,7 +324,7 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
         imageMimeType: session.imageMimeType,
         tags: mergeTags(session.productTag, keywordTags),
         linkedProducts: session.linkedProducts,
-        postType: "blog"
+        postType
       });
       return;
     }
