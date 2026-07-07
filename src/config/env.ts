@@ -62,6 +62,7 @@ export const config = {
   sapoApiKey: requireEnv("SAPO_API_KEY"),
   sapoApiSecret: requireEnv("SAPO_API_SECRET"),
   sapoDefaultBlogName: process.env.SAPO_DEFAULT_BLOG_NAME?.trim() || "Biên tập viên giới thiệu",
+  sapoBlogBlogName: process.env.SAPO_BLOG_BLOG_NAME?.trim() || "Blog",
   sapoAuthorBlogName: process.env.SAPO_AUTHOR_BLOG_NAME?.trim() || "Tác giả",
   sapoAuthorTemplateLayout: process.env.SAPO_AUTHOR_TEMPLATE_LAYOUT?.trim() || "article.author",
   sapoProductUrlHost: process.env.SAPO_PRODUCT_URL_HOST?.trim().toLowerCase() || "nhanam.vn",
