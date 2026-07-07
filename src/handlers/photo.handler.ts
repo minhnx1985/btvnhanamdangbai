@@ -79,16 +79,17 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
       return;
     }
 
+    const postType = session.postType ?? "blog";
     setSession(userId, {
       state: "waiting_product_link",
-      postType: "blog",
+      postType,
       title: session.title,
       content: session.content,
       imageBase64: processedImage.base64,
       imageMimeType: processedImage.mimeType
     });
 
-    await replySafely(ctx, messages.askProductLink, { userId, postType: "blog" });
+    await replySafely(ctx, messages.askProductLink, { userId, postType });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Không thể xử lý ảnh dưới 1MB";
     logger.error("photo handler failed", { userId, reason, postType: session.postType ?? "blog" });
