@@ -25,7 +25,7 @@ type TextToken =
 
 const PARAGRAPH_SPACER = "";
 const FEATURE_IMAGE_SPACER = "";
-const ALLOWED_ARTICLE_FORMAT_TAGS = new Set(["h1", "h2", "h3", "p", "strong", "em", "blockquote", "ul", "ol", "li", "img"]);
+const ALLOWED_ARTICLE_FORMAT_TAGS = new Set(["h2", "h3", "p", "strong", "em", "blockquote", "ul", "ol", "li", "img"]);
 
 function escapeHtml(text: string): string {
   return text
@@ -120,7 +120,6 @@ function buildTextParagraph(lines: string[], linkedProducts: LinkedProduct[]): s
 
 export function applyReadableSpacingToHtml(html: string): string {
   return html
-    .replace(/<h1>/g, `<h1 style="line-height: 1.2; margin: 1.5em 0 0.75em;">`)
     .replace(/<p style="text-align: right;">/g, `<p style="line-height: 1.2; margin-bottom: 1.5em; text-align: right;">`)
     .replace(/<p>/g, `<p style="line-height: 1.2; margin-bottom: 1.5em;">`)
     .replace(/<li>/g, `<li style="line-height: 1.2; margin-bottom: 0.5em;">`)
@@ -166,7 +165,8 @@ function buildArticleFormatMessages(input: ArticleContentFormatInput): ShopApiCh
         "- Không sửa văn phong.",
         "",
         "Được phép format:",
-        "- Tự nhận diện heading và dùng h1, h2, h3 đúng cấp nếu trong văn bản có dấu hiệu heading rõ ràng.",
+        "- Tự nhận diện heading và chỉ dùng h2, h3 đúng cấp nếu trong văn bản có dấu hiệu heading rõ ràng.",
+        "- Heading cấp cao nhất trong nội dung phải là h2. Tuyệt đối không dùng h1.",
         "- In đậm tên sách bằng strong.",
         "- In nghiêng tên tác giả bằng em.",
         "- Chuyển danh sách thành ul/ol/li nếu người dùng đã viết theo dạng danh sách hoặc từng dòng.",
@@ -179,7 +179,7 @@ function buildArticleFormatMessages(input: ArticleContentFormatInput): ShopApiCh
         "- Không tự đoán nguồn nếu text không có nguồn.",
         "",
         "HTML được dùng:",
-        "- h1, h2, h3, p, strong, em, blockquote, ul, ol, li, img.",
+        "- h2, h3, p, strong, em, blockquote, ul, ol, li, img.",
         "- Riêng p nguồn quote được dùng style đúng y hệt: style=\"text-align: right;\".",
         "- Riêng img chỉ được dùng src là URL ảnh trực tiếp từ nội dung người dùng và alt rỗng.",
         "",
@@ -222,7 +222,8 @@ function sanitizeArticleFormatHtml(html: string): string {
       return imageUrl ? renderImageTag(imageUrl) : "";
     })
     .replace(/<\/?(?!img\b)([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?>/g, (fullTag, tagName: string) => {
-      const normalizedTag = tagName.toLowerCase();
+      const sourceTag = tagName.toLowerCase();
+      const normalizedTag = sourceTag === "h1" ? "h2" : sourceTag;
       if (!ALLOWED_ARTICLE_FORMAT_TAGS.has(normalizedTag)) {
         return "";
       }
