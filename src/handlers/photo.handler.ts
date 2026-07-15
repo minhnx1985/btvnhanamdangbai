@@ -104,12 +104,14 @@ export async function handlePhotoMessage(ctx: PhotoContext): Promise<void> {
     }
 
     const postType = session.postType ?? "blog";
+    const autoProductLinkDetectionStartedAt = Date.now();
     const autoProductLinks = productLinkCatalogService.findProductLinksInText(`${session.title}\n\n${session.content}`);
 
     logger.info("auto_product_links_detected", {
       userId,
       postType,
       count: autoProductLinks.length,
+      durationMs: Date.now() - autoProductLinkDetectionStartedAt,
       titles: autoProductLinks.map((product) => product.title).slice(0, 10)
     });
 

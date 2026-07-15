@@ -59,6 +59,7 @@ function normalizeText(value: string): string {
     .toLocaleLowerCase("vi")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -71,17 +72,12 @@ function foldVietnamese(value: string): string {
     .replace(/Đ/g, "d");
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function titleAppearsInText(normalizedText: string, normalizedTitle: string, minLength = MIN_TITLE_MATCH_LENGTH): boolean {
   if (normalizedTitle.length < minLength) {
     return false;
   }
 
-  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(normalizedTitle)}(?=$|[^\\p{L}\\p{N}])`, "u");
-  return pattern.test(normalizedText);
+  return normalizedText.includes(` ${normalizedTitle} `);
 }
 
 function canUseFoldedMatch(value: string): boolean {
@@ -121,8 +117,8 @@ class ProductLinkCatalogService {
   private catalog: CatalogProductLink[] | undefined;
 
   findProductLinksInText(text: string): ProductLinkCandidate[] {
-    const normalizedText = normalizeText(text);
-    if (!normalizedText) {
+    const normalizedText = ` ${normalizeText(text)} `;
+    if (normalizedText.trim().length === 0) {
       return [];
     }
 
