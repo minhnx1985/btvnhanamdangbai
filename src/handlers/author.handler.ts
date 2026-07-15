@@ -1,6 +1,7 @@
 import { Context } from "telegraf";
 import { messages } from "../bot/messages";
 import { resetSession, setSession } from "../bot/sessionStore";
+import { clearProductLinkAutoSkip } from "../services/product-link-autoskip.service";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
 
@@ -11,6 +12,7 @@ export async function handleAuthor(ctx: Context): Promise<void> {
     return;
   }
 
+  clearProductLinkAutoSkip(userId);
   resetSession(userId);
   setSession(userId, { state: "waiting_title", postType: "author" });
   logger.info("/author started by user id", { userId });

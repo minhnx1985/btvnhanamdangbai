@@ -31,7 +31,7 @@ export const messages = {
   contentAppended: "Đã nhận thêm nội dung. Bạn có thể gửi tiếp hoặc gửi ảnh feature để sang bước tiếp theo.",
   askImage: "Gửi ảnh feature",
   askProductLink:
-    "Gửi link sản phẩm dạng https://nhanam.vn/... để gắn tag cho bài viết, hoặc trả lời BO QUA để bỏ qua.",
+    "Gửi link sản phẩm dạng https://nhanam.vn/... để gắn tag cho bài viết, hoặc trả lời BO QUA nếu không muốn thêm link bằng tay.",
   askKeywords:
     "Có từ khóa gì không? Nếu có, hãy gửi các từ khóa cách nhau bằng dấu phẩy (,). Nếu không có thì trả lời: khong, không, ko, k, không có từ khóa, hoặc chỉ gửi dấu chấm .",
   cancelCurrentAction: "❌ Đã hủy thao tác hiện tại",

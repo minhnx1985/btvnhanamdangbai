@@ -12,6 +12,11 @@ export type LinkedProduct = {
   url: string;
 };
 
+export type ProductLinkCandidate = {
+  title: string;
+  url: string;
+};
+
 export type ResolvedProductLinks = {
   tag: string;
   linkedProducts: LinkedProduct[];

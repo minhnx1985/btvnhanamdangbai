@@ -1,6 +1,7 @@
 import { Context } from "telegraf";
 import { messages } from "../bot/messages";
 import { resetSession, setSession } from "../bot/sessionStore";
+import { clearProductLinkAutoSkip } from "../services/product-link-autoskip.service";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
 
@@ -11,6 +12,7 @@ export async function handleNewPost(ctx: Context): Promise<void> {
     return;
   }
 
+  clearProductLinkAutoSkip(userId);
   resetSession(userId);
   setSession(userId, { state: "waiting_title", postType: "blog" });
   logger.info("/newpost started by user id", { userId });

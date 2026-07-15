@@ -1,4 +1,4 @@
-import { LinkedProduct } from "./sapo";
+import { LinkedProduct, ProductLinkCandidate } from "./sapo";
 
 export type SessionState =
   | "idle"
@@ -19,4 +19,5 @@ export type PostSession = {
   imageMimeType?: string;
   productTag?: string;
   linkedProducts?: LinkedProduct[];
+  autoProductLinks?: ProductLinkCandidate[];
 };

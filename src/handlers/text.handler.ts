@@ -5,10 +5,11 @@ import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { formatArticleContentHtml } from "../services/content.service";
 import { detectDraftIntake } from "../services/draft-intake.service";
+import { clearProductLinkAutoSkip } from "../services/product-link-autoskip.service";
 import { sapoService } from "../services/sapo.service";
 import { shopApiService } from "../services/shopapi.service";
-import { LinkedProduct } from "../types/sapo";
-import { PostType } from "../types/session";
+import { LinkedProduct, ProductLinkCandidate } from "../types/sapo";
+import { PostSession, PostType } from "../types/session";
 import { logger } from "../utils/logger";
 import { replySafely } from "../utils/telegram";
 import { handleDetectedProductUrl, handleProductSeoEnrichmentText } from "./product-seo.handler";
@@ -74,6 +75,15 @@ function mergeTags(existingTag: string | undefined, keywords: string[]): string 
   return merged.length > 0 ? merged.join(", ") : undefined;
 }
 
+function buildProductLinkText(autoProductLinks: ProductLinkCandidate[] | undefined, manualText?: string): string {
+  return [
+    ...(autoProductLinks ?? []).map((product) => product.url),
+    manualText?.trim() ?? ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function generateAutomaticTags(input: DraftSubmissionInput): Promise<string | undefined> {
   try {
     const keywords = await shopApiService.generateKeywordTags({
@@ -87,6 +97,75 @@ async function generateAutomaticTags(input: DraftSubmissionInput): Promise<strin
     logger.warn("automatic keyword generation skipped", { reason, postType: input.postType });
     return input.tags;
   }
+}
+
+async function submitDraftPostFromProductLinkStep(
+  ctx: Context,
+  userId: number,
+  session: PostSession,
+  productLinkText: string
+): Promise<void> {
+  if (!session.title || !session.content || !session.imageBase64 || !session.imageMimeType) {
+    resetSession(userId);
+    await replySafely(ctx, "❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại", { userId });
+    return;
+  }
+
+  const postType = session.postType ?? "blog";
+  resetSession(userId);
+
+  if (!productLinkText.trim()) {
+    await submitDraftPost(ctx, userId, {
+      title: session.title,
+      content: session.content,
+      imageBase64: session.imageBase64,
+      imageMimeType: session.imageMimeType,
+      postType
+    });
+    return;
+  }
+
+  try {
+    const resolvedProducts = await sapoService.resolveProductLinks(productLinkText);
+    await submitDraftPost(ctx, userId, {
+      title: session.title,
+      content: session.content,
+      imageBase64: session.imageBase64,
+      imageMimeType: session.imageMimeType,
+      tags: resolvedProducts.tag,
+      linkedProducts: resolvedProducts.linkedProducts,
+      postType
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Skip invalid product links";
+    logger.warn("product link resolution failed", {
+      userId,
+      reason: message,
+      autoProductLinks: session.autoProductLinks?.length ?? 0
+    });
+    await submitDraftPost(ctx, userId, {
+      title: session.title,
+      content: session.content,
+      imageBase64: session.imageBase64,
+      imageMimeType: session.imageMimeType,
+      postType
+    });
+  }
+}
+
+export async function submitDraftPostAfterProductLinkTimeout(ctx: Context, userId: number): Promise<void> {
+  const session = getSession(userId);
+  if (session.state !== "waiting_product_link") {
+    return;
+  }
+
+  logger.info("product_link_auto_skip_timeout", {
+    userId,
+    autoProductLinks: session.autoProductLinks?.length ?? 0,
+    postType: session.postType ?? "blog"
+  });
+
+  await submitDraftPostFromProductLinkStep(ctx, userId, session, buildProductLinkText(session.autoProductLinks));
 }
 
 export async function submitDraftPost(
@@ -248,6 +327,8 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
     }
 
     if (session.state === "waiting_product_link") {
+      clearProductLinkAutoSkip(userId);
+
       if (!session.title || !session.content || !session.imageBase64 || !session.imageMimeType) {
         resetSession(userId);
         await replySafely(ctx, "❌ Tạo bài nháp thất bại: Lỗi hệ thống, vui lòng thử lại", { userId });
@@ -255,43 +336,17 @@ export async function handleTextMessage(ctx: TextContext): Promise<void> {
       }
 
       if (isSkipProductLinkInput(text)) {
-        const postType = session.postType ?? "blog";
-        await submitDraftPost(ctx, userId, {
-          title: session.title,
-          content: session.content,
-          imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType,
-          postType
-        });
+        await submitDraftPostFromProductLinkStep(ctx, userId, session, buildProductLinkText(session.autoProductLinks));
         return;
       }
 
-      try {
-        const resolvedProducts = await sapoService.resolveProductLinks(text);
-        const postType = session.postType ?? "blog";
-        await submitDraftPost(ctx, userId, {
-          title: session.title,
-          content: session.content,
-          imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType,
-          tags: resolvedProducts.tag,
-          linkedProducts: resolvedProducts.linkedProducts,
-          postType
-        });
-        return;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Skip invalid product links";
-        logger.warn("product link resolution failed", { userId, reason: message });
-        const postType = session.postType ?? "blog";
-        await submitDraftPost(ctx, userId, {
-          title: session.title,
-          content: session.content,
-          imageBase64: session.imageBase64,
-          imageMimeType: session.imageMimeType,
-          postType
-        });
-        return;
-      }
+      await submitDraftPostFromProductLinkStep(
+        ctx,
+        userId,
+        session,
+        buildProductLinkText(session.autoProductLinks, text)
+      );
+      return;
     }
 
     if (session.state === "waiting_keywords") {
