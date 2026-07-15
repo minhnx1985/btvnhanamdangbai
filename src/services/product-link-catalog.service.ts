@@ -6,10 +6,18 @@ import { logger } from "../utils/logger";
 const DEFAULT_CATALOG_FILE = "ten_sach_tong_hop_2_links_nhanam.csv";
 const MIN_TITLE_MATCH_LENGTH = 4;
 const MIN_SHORT_TITLE_MATCH_LENGTH = 8;
+const MIN_FOLDED_TITLE_MATCH_LENGTH = 10;
+const MIN_FOLDED_TITLE_WORDS = 3;
 const MAX_AUTO_PRODUCT_LINKS = 10;
 
+type MatchTitle = {
+  value: string;
+  minLength: number;
+  folded: boolean;
+};
+
 type CatalogProductLink = ProductLinkCandidate & {
-  matchTitles: string[];
+  matchTitles: MatchTitle[];
 };
 
 function parseCsvLine(line: string): string[] {
@@ -45,17 +53,22 @@ function parseCsvLine(line: string): string[] {
   return cells.map((cell) => cell.trim());
 }
 
-function normalizeForMatch(value: string): string {
+function normalizeText(value: string): string {
   return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "d")
+    .normalize("NFC")
     .toLocaleLowerCase("vi")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function foldVietnamese(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d");
 }
 
 function escapeRegExp(value: string): string {
@@ -71,29 +84,55 @@ function titleAppearsInText(normalizedText: string, normalizedTitle: string, min
   return pattern.test(normalizedText);
 }
 
-function buildMatchTitles(title: string): string[] {
-  const normalizedTitle = normalizeForMatch(title);
-  const shortTitle = normalizeForMatch(title.split(/\s+[-–—:]\s+/)[0] ?? "");
+function canUseFoldedMatch(value: string): boolean {
+  const words = value
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
 
-  return [normalizedTitle, shortTitle]
+  return value.length >= MIN_FOLDED_TITLE_MATCH_LENGTH && words.length >= MIN_FOLDED_TITLE_WORDS;
+}
+
+function buildMatchTitles(title: string): MatchTitle[] {
+  const normalizedTitle = normalizeText(title);
+  const shortTitle = normalizeText(title.split(/\s+[-–—:]\s+/)[0] ?? "");
+  const baseTitles = [normalizedTitle, shortTitle]
     .filter((item, index, items) => item && items.indexOf(item) === index);
+  const matchTitles: MatchTitle[] = [];
+
+  for (const [index, value] of baseTitles.entries()) {
+    const minLength = index === 0 ? MIN_TITLE_MATCH_LENGTH : MIN_SHORT_TITLE_MATCH_LENGTH;
+    matchTitles.push({ value, minLength, folded: false });
+
+    const foldedValue = foldVietnamese(value);
+    if (foldedValue !== value && canUseFoldedMatch(foldedValue)) {
+      matchTitles.push({
+        value: foldedValue,
+        minLength: Math.max(minLength, MIN_FOLDED_TITLE_MATCH_LENGTH),
+        folded: true
+      });
+    }
+  }
+
+  return matchTitles;
 }
 
 class ProductLinkCatalogService {
   private catalog: CatalogProductLink[] | undefined;
 
   findProductLinksInText(text: string): ProductLinkCandidate[] {
-    const normalizedText = normalizeForMatch(text);
+    const normalizedText = normalizeText(text);
     if (!normalizedText) {
       return [];
     }
 
+    const foldedText = foldVietnamese(normalizedText);
     const seenUrls = new Set<string>();
     const matches: ProductLinkCandidate[] = [];
 
     for (const item of this.loadCatalog()) {
-      const didMatch = item.matchTitles.some((matchTitle, index) =>
-        titleAppearsInText(normalizedText, matchTitle, index === 0 ? MIN_TITLE_MATCH_LENGTH : MIN_SHORT_TITLE_MATCH_LENGTH)
+      const didMatch = item.matchTitles.some((matchTitle) =>
+        titleAppearsInText(matchTitle.folded ? foldedText : normalizedText, matchTitle.value, matchTitle.minLength)
       );
 
       if (!didMatch || seenUrls.has(item.url)) {
@@ -130,7 +169,7 @@ class ProductLinkCatalogService {
           return { title, url, matchTitles: title ? buildMatchTitles(title) : [] };
         })
         .filter((item) => item.title && item.url?.startsWith("http"))
-        .sort((a, b) => b.matchTitles[0].length - a.matchTitles[0].length);
+        .sort((a, b) => b.matchTitles[0].value.length - a.matchTitles[0].value.length);
 
       logger.info("product_link_catalog_loaded", { count: this.catalog.length, file: DEFAULT_CATALOG_FILE });
       return this.catalog;
