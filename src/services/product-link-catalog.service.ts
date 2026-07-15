@@ -5,7 +5,12 @@ import { logger } from "../utils/logger";
 
 const DEFAULT_CATALOG_FILE = "ten_sach_tong_hop_2_links_nhanam.csv";
 const MIN_TITLE_MATCH_LENGTH = 4;
+const MIN_SHORT_TITLE_MATCH_LENGTH = 8;
 const MAX_AUTO_PRODUCT_LINKS = 10;
+
+type CatalogProductLink = ProductLinkCandidate & {
+  matchTitles: string[];
+};
 
 function parseCsvLine(line: string): string[] {
   const cells: string[] = [];
@@ -42,7 +47,10 @@ function parseCsvLine(line: string): string[] {
 
 function normalizeForMatch(value: string): string {
   return value
-    .normalize("NFC")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
     .toLocaleLowerCase("vi")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
@@ -54,8 +62,8 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function titleAppearsInText(normalizedText: string, normalizedTitle: string): boolean {
-  if (normalizedTitle.length < MIN_TITLE_MATCH_LENGTH) {
+function titleAppearsInText(normalizedText: string, normalizedTitle: string, minLength = MIN_TITLE_MATCH_LENGTH): boolean {
+  if (normalizedTitle.length < minLength) {
     return false;
   }
 
@@ -63,8 +71,16 @@ function titleAppearsInText(normalizedText: string, normalizedTitle: string): bo
   return pattern.test(normalizedText);
 }
 
+function buildMatchTitles(title: string): string[] {
+  const normalizedTitle = normalizeForMatch(title);
+  const shortTitle = normalizeForMatch(title.split(/\s+[-–—:]\s+/)[0] ?? "");
+
+  return [normalizedTitle, shortTitle]
+    .filter((item, index, items) => item && items.indexOf(item) === index);
+}
+
 class ProductLinkCatalogService {
-  private catalog: ProductLinkCandidate[] | undefined;
+  private catalog: CatalogProductLink[] | undefined;
 
   findProductLinksInText(text: string): ProductLinkCandidate[] {
     const normalizedText = normalizeForMatch(text);
@@ -76,8 +92,11 @@ class ProductLinkCatalogService {
     const matches: ProductLinkCandidate[] = [];
 
     for (const item of this.loadCatalog()) {
-      const normalizedTitle = normalizeForMatch(item.title);
-      if (!titleAppearsInText(normalizedText, normalizedTitle) || seenUrls.has(item.url)) {
+      const didMatch = item.matchTitles.some((matchTitle, index) =>
+        titleAppearsInText(normalizedText, matchTitle, index === 0 ? MIN_TITLE_MATCH_LENGTH : MIN_SHORT_TITLE_MATCH_LENGTH)
+      );
+
+      if (!didMatch || seenUrls.has(item.url)) {
         continue;
       }
 
@@ -92,7 +111,7 @@ class ProductLinkCatalogService {
     return matches;
   }
 
-  private loadCatalog(): ProductLinkCandidate[] {
+  private loadCatalog(): CatalogProductLink[] {
     if (this.catalog) {
       return this.catalog;
     }
@@ -108,10 +127,10 @@ class ProductLinkCatalogService {
         .filter(Boolean)
         .map((line) => {
           const [title, url] = parseCsvLine(line);
-          return { title, url };
+          return { title, url, matchTitles: title ? buildMatchTitles(title) : [] };
         })
         .filter((item) => item.title && item.url?.startsWith("http"))
-        .sort((a, b) => b.title.length - a.title.length);
+        .sort((a, b) => b.matchTitles[0].length - a.matchTitles[0].length);
 
       logger.info("product_link_catalog_loaded", { count: this.catalog.length, file: DEFAULT_CATALOG_FILE });
       return this.catalog;
