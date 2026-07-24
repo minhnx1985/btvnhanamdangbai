@@ -8,7 +8,7 @@ const BRACKET_PATTERNS = [
 ];
 
 const PRICE_PATTERNS = [
-  /(?:giá|gia)(?:\s+\S+){0,4}\s*[:：]?\s*\d{1,3}(?:[.,]\d{3})*(?:\s*(?:đ|₫|vnd|vnđ|k))?/giu,
+  /\b(?:giá|gia)(?:\s+(?:bìa|bia|bán|ban|sale|km|khuyến\s+mãi|khuyen\s+mai))?\s*[:：]?\s*\d{1,3}(?:[.,]\d{3})*(?:\s*(?:đ|₫|vnd|vnđ|k))?/giu,
   /\b\d{1,3}(?:[.,]\d{3})+(?:\s*(?:đ|₫|vnd|vnđ))?/giu,
   /\b\d+\s*(?:đ|₫|vnd|vnđ|k)\b/giu
 ];
@@ -128,8 +128,35 @@ function isLikelyAuthorPrefix(value: string): boolean {
   return words.every((word) => isCapitalizedWord(word) || isUppercaseWord(word));
 }
 
+function isLikelyAuthorSuffix(value: string): boolean {
+  return isLikelyAuthorPrefix(value) && /^[A-Za-z.'\-\s]+$/.test(value.trim());
+}
+
+function removeLikelyAuthorSuffix(value: string): string {
+  const parts = value
+    .split(/\s+[-–—]\s+/u)
+    .map((part) => cleanupTitle(part))
+    .filter(Boolean);
+
+  if (parts.length !== 2) {
+    return cleanupTitle(value);
+  }
+
+  const [title, possibleAuthor] = parts;
+  if (!title || !possibleAuthor || !isLikelyAuthorSuffix(possibleAuthor)) {
+    return cleanupTitle(value);
+  }
+
+  return cleanupTitle(title);
+}
+
 function removeCatalogPrefix(value: string): string {
   const withoutBookLabel = value.replace(/^\s*(?:sách|sach|book)\s*[:：\-–—]\s*/iu, "");
+  const withoutAuthorSuffix = removeLikelyAuthorSuffix(withoutBookLabel);
+  if (withoutAuthorSuffix !== cleanupTitle(withoutBookLabel)) {
+    return withoutAuthorSuffix;
+  }
+
   const parts = withoutBookLabel
     .split(/\s+[-–—]\s+/u)
     .map((part) => cleanupTitle(part))
@@ -162,33 +189,94 @@ function removeComboPrefix(value: string): string {
     .trim();
 }
 
+function cleanComboName(value: string): string {
+  const source = value.split(/[:：]/u, 1)[0] ?? value;
+
+  return cleanupTitle(source)
+    .replace(/^(?:combo sách|combo sach|bộ combo|bo combo|combo)\s*[:：\-–—+]?\s*/iu, "")
+    .trim();
+}
+
+function extractExistingMarketingComboName(value: string): string {
+  const match = value.match(/^\s*combo\s*\+?\s*([^:：]+)[:：]\s*(.+)$/iu);
+  if (!match) {
+    return "";
+  }
+
+  return cleanComboName(match[1] ?? "");
+}
+
+function isCatalogNumberComboTitle(value: string): boolean {
+  const normalized = value.trim();
+  return (
+    /^combo\s+\d{1,4}\b/iu.test(normalized) ||
+    /^\d{1,3}\s+[\p{L}\p{N}]/u.test(normalized) ||
+    /^\d{1,3}\s*[-–—]\s*(?:combo|bộ|bo|tác giả|tac gia)\b/iu.test(normalized)
+  );
+}
+
+function removeComboCatalogNumber(value: string): string {
+  return cleanupTitle(value.replace(/^(?:combo\s+)?\d{1,4}\s*(?:[-–—]\s*)?/iu, ""));
+}
+
+function isComboSetDescriptor(value: string): boolean {
+  const normalized = removeDiacritics(value).toLocaleLowerCase("vi-VN").trim();
+  return (
+    /\b\d+\s*(?:cuon|quyen|tap|volumes?|books?)\b/u.test(normalized) ||
+    /^(?:bo|tron bo|tu sach)\b/u.test(normalized)
+  );
+}
+
 export function extractComboBookTitles(rawTitle: string): string[] {
   const cleanedTitle = cleanProductTitle(rawTitle);
-  return removeComboPrefix(cleanedTitle)
+  const withoutComboPrefix = removeComboPrefix(cleanedTitle);
+
+  if (isCatalogNumberComboTitle(withoutComboPrefix) || isComboSetDescriptor(withoutComboPrefix)) {
+    return [];
+  }
+
+  return withoutComboPrefix
     .split(/\s+(?:và|va)\s+|\s*[+&]\s*/iu)
     .map((item) => removeCatalogPrefix(cleanupTitle(item)))
     .filter(Boolean);
 }
 
+export function extractComboNameSeed(rawTitle: string): string {
+  const cleanedTitle = cleanProductTitle(rawTitle);
+  const existingMarketingComboName = extractExistingMarketingComboName(cleanedTitle);
+  if (existingMarketingComboName) {
+    return existingMarketingComboName;
+  }
+
+  const withoutComboPrefix = removeComboPrefix(cleanedTitle);
+  return isCatalogNumberComboTitle(withoutComboPrefix)
+    ? cleanComboName(removeComboCatalogNumber(withoutComboPrefix))
+    : cleanComboName(withoutComboPrefix);
+}
+
 export function formatMarketingComboProductTitle(comboName: string, bookTitles: string[]): string {
-  const normalizedComboName = cleanupTitle(comboName).toLocaleUpperCase("vi-VN");
+  const normalizedComboName = cleanComboName(comboName);
   const normalizedBookTitles = bookTitles
-    .map((title) => cleanupTitle(title).toLocaleUpperCase("vi-VN"))
+    .map((title) => cleanupTitle(title))
     .filter(Boolean);
 
-  if (!normalizedComboName || normalizedBookTitles.length === 0) {
+  if (!normalizedComboName) {
     return "";
   }
 
-  return `COMBO + ${normalizedComboName}: ${normalizedBookTitles.join(", ")}`;
+  if (normalizedBookTitles.length === 0) {
+    return `COMBO ${normalizedComboName}`;
+  }
+
+  return `COMBO ${normalizedComboName}: ${normalizedBookTitles.join(" - ")} -`;
 }
 
 export function normalizeProductTitleForBook(rawTitle: string, options: { alias?: string } = {}): string {
   const cleaned = cleanProductTitle(rawTitle);
   if (isComboProductTitle(rawTitle, options.alias)) {
     const bookTitles = extractComboBookTitles(rawTitle);
-    const fallbackComboName = bookTitles.length > 1 ? bookTitles.join(" - ") : removeComboPrefix(cleaned);
-    return formatMarketingComboProductTitle(fallbackComboName, bookTitles.length > 0 ? bookTitles : [fallbackComboName]);
+    const fallbackComboName = bookTitles.length > 1 ? bookTitles.join(" - ") : extractComboNameSeed(rawTitle);
+    return formatMarketingComboProductTitle(fallbackComboName, bookTitles);
   }
 
   return cleaned.toLocaleUpperCase("vi-VN");

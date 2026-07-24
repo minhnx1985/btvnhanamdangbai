@@ -3,7 +3,7 @@ import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { stripHtml } from "./product-audit.service";
 import { productResearchService } from "./product-research.service";
-import { extractComboBookTitles, formatMarketingComboProductTitle } from "./product-title-normalizer.service";
+import { extractComboBookTitles, extractComboNameSeed, formatMarketingComboProductTitle } from "./product-title-normalizer.service";
 import { ShopApiChatMessage, shopApiService } from "./shopapi.service";
 
 type RawComboTitleResult = {
@@ -26,6 +26,7 @@ function sanitizeComboName(value: unknown): string {
 
   return value
     .replace(/^combo\s*\+?/iu, "")
+    .replace(/^(?:combo\s+)?\d+\s*/iu, "")
     .replace(/[:：].*$/u, "")
     .replace(/[“”"']/g, "")
     .replace(/\s+/g, " ")
@@ -48,6 +49,7 @@ function compactResearchSources(sources: ProductResearchSource[]): Array<{
 
 function buildMessages(
   product: NormalizedSapoProduct,
+  comboNameSeed: string,
   bookTitles: string[],
   researchSources: ProductResearchSource[]
 ): ShopApiChatMessage[] {
@@ -59,6 +61,8 @@ function buildMessages(
         "Nhiệm vụ: đặt một tên combo ngắn, hấp dẫn, có tính marketing, dựa hoàn toàn trên dữ liệu được cung cấp.",
         "Ưu tiên dùng thông tin nội dung sách từ phần researchSources nếu có.",
         "Không bịa thông tin, không thêm giải thưởng, không dùng giọng quá đà.",
+        "Nếu có comboNameSeed, dùng nó như gợi ý tên/chủ đề combo sau khi đã bỏ mã số catalog.",
+        "Không đưa số catalog như 174, 175, 001 vào comboName.",
         "Tên combo phải là một cụm danh từ/cụm mô tả ngắn, không quá 8 từ.",
         "Không dùng từ COMBO trong comboName.",
         "Không đưa danh sách tên sách vào comboName.",
@@ -71,6 +75,7 @@ function buildMessages(
       role: "user",
       content: JSON.stringify({
         currentProductTitle: product.title,
+        comboNameSeed,
         bookTitles,
         productSummary: truncateText(stripHtml(product.summary ?? ""), 1200),
         productDescription: truncateText(stripHtml(product.content ?? ""), 1800),
@@ -88,9 +93,7 @@ export async function generateMarketingComboProductTitle(
   alias: string
 ): Promise<{ finalTitle: string; comboName: string; bookTitles: string[] }> {
   const bookTitles = extractComboBookTitles(product.title);
-  if (bookTitles.length === 0) {
-    throw new AppError("Không tách được tên sách trong combo", "COMBO_BOOK_TITLES_MISSING");
-  }
+  const comboNameSeed = extractComboNameSeed(product.title);
 
   const researchStartedAt = Date.now();
   const researchSources = await productResearchService.researchComboBooks(bookTitles, product);
@@ -102,7 +105,9 @@ export async function generateMarketingComboProductTitle(
     durationMs: Date.now() - researchStartedAt
   });
 
-  const result = await shopApiService.generateJson<RawComboTitleResult>(buildMessages(product, bookTitles, researchSources));
+  const result = await shopApiService.generateJson<RawComboTitleResult>(
+    buildMessages(product, comboNameSeed, bookTitles, researchSources)
+  );
   const comboName = sanitizeComboName(result.comboName);
   if (!comboName) {
     throw new AppError("AI không trả tên combo hợp lệ", "AI_COMBO_TITLE_INVALID_RESPONSE");
