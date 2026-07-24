@@ -7,6 +7,7 @@ import { handleBlog } from "../handlers/blog.handler";
 import { handleCancel } from "../handlers/cancel.handler";
 import { handleNewPost } from "../handlers/newpost.handler";
 import { handlePhotoMessage } from "../handlers/photo.handler";
+import { handleNormalizeProductTitleCommand, handleProductTitleCallback } from "../handlers/product-title.handler";
 import {
   handleInspectProductCommand,
   handleProductSeoCallback,
@@ -43,9 +44,16 @@ export function createBot(): Telegraf<Context> {
   bot.command("author", handleAuthor);
   bot.command("cancel", handleCancel);
   bot.command("seo", handleSeoCommand);
+  bot.command("sp", handleNormalizeProductTitleCommand);
   bot.command("inspectproduct", handleInspectProductCommand);
   bot.command("testupdate", handleTestUpdateCommand);
-  bot.on("callback_query", handleProductSeoCallback);
+  bot.on("callback_query", async (ctx) => {
+    if (await handleProductTitleCallback(ctx)) {
+      return;
+    }
+
+    await handleProductSeoCallback(ctx);
+  });
 
   bot.on("text", async (ctx) => {
     if (!isAuthorizedUser(ctx.from?.id)) {

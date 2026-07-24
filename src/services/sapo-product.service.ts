@@ -163,6 +163,41 @@ class SapoProductService {
     await this.updateProductContent(productId, html);
   }
 
+  async updateProductTitle(
+    productId: string | number,
+    title: string,
+    logContext: Record<string, unknown> = {}
+  ): Promise<void> {
+    try {
+      logger.info("sapo_product_title_update_started", { ...logContext, productId, title });
+      await this.client.put<ProductResponse>(`/admin/products/${productId}.json`, {
+        product: {
+          id: productId,
+          title
+        }
+      });
+      logger.info("sapo_product_title_update_put_ok", { ...logContext, productId });
+
+      const updated = await this.getProduct(productId);
+      if (updated?.title !== title) {
+        logger.error("sapo_product_title_update_verify_failed", {
+          ...logContext,
+          productId,
+          expectedTitle: title,
+          actualTitle: updated?.title ?? ""
+        });
+        throw new AppError("Sapo returned OK but product.title was not changed", "SAPO_PRODUCT_TITLE_VERIFY_FAILED");
+      }
+
+      logger.info("sapo_product_title_update_verified", { ...logContext, productId, title });
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw mapSapoProductError(error);
+    }
+  }
+
   async updateProductSeoFields(
     _productId: string | number,
     _seo: { seoTitle: string; metaDescription: string }
