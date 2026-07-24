@@ -55,6 +55,61 @@ function sanitizeBookTitle(value: string): string {
     .trim();
 }
 
+function removeDiacritics(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+}
+
+function cleanupInlineText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function isProductVariantAttribute(value: string): boolean {
+  const normalized = removeDiacritics(cleanupInlineText(value)).toLocaleLowerCase("vi-VN");
+
+  if (!normalized || /\b(?:gia|vnd|isbn|sku|nha nam|nhanam)\b/u.test(normalized)) {
+    return false;
+  }
+
+  return /\b(?:khong kem|khong co|co kem|kem|hop|bia cung|bia mem|ban dac biet|limited)\b/u.test(normalized);
+}
+
+function extractProductVariantAttributes(rawTitle: string): string[] {
+  const attributes: string[] = [];
+  const pattern = /\(([^()]+)\)|\[([^\[\]]+)\]|\{([^{}]+)\}|（([^（）]+)）|【([^【】]+)】/gu;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(rawTitle)) !== null) {
+    const value = cleanupInlineText(match.slice(1).find((item) => typeof item === "string" && item.trim().length > 0) ?? "");
+    if (value && isProductVariantAttribute(value)) {
+      attributes.push(value);
+    }
+  }
+
+  return attributes.filter(
+    (attribute, index, values) =>
+      values.findIndex((item) => item.toLocaleLowerCase("vi-VN") === attribute.toLocaleLowerCase("vi-VN")) === index
+  );
+}
+
+function appendProductVariantAttributes(finalTitle: string, rawTitle: string): string {
+  const attributes = extractProductVariantAttributes(rawTitle);
+  if (attributes.length === 0) {
+    return finalTitle;
+  }
+
+  const normalizedFinalTitle = removeDiacritics(finalTitle).toLocaleLowerCase("vi-VN");
+  const suffix = attributes
+    .filter((attribute) => !normalizedFinalTitle.includes(removeDiacritics(attribute).toLocaleLowerCase("vi-VN")))
+    .map((attribute) => `(${attribute.toLocaleUpperCase("vi-VN")})`)
+    .join(" ");
+
+  return suffix ? `${finalTitle} ${suffix}` : finalTitle;
+}
+
 function buildMessages(
   product: NormalizedSapoProduct
 ): ShopApiChatMessage[] {
@@ -73,6 +128,7 @@ function buildMessages(
         "Không dùng dấu hai chấm trong comboName.",
         "bookTitles chỉ gồm tên các cuốn sách cụ thể thật sự có trong combo.",
         "Không đưa các mô tả bộ như 'Bộ triết 5 cuốn', 'Combo tác giả...', 'Trọn bộ...', 'Tủ sách...' vào bookTitles nếu đó không phải tên sách.",
+        "Không đưa thuộc tính biến thể như 'không kèm hộp', 'bìa cứng', 'bìa mềm' vào comboName hoặc bookTitles; code sẽ giữ riêng ở cuối title.",
         "Nếu tên hiện tại chỉ có mã combo/chủ đề/tác giả hoặc mô tả bộ, không có tên sách cụ thể, trả bookTitles là mảng rỗng [].",
         "Tên sau cùng sẽ được code format thành: COMBO <comboName>: <book 1> - <book 2>.",
         "Nếu bookTitles rỗng, code sẽ format thành: COMBO <comboName>.",
@@ -111,7 +167,7 @@ export async function generateMarketingComboProductTitle(
   }
 
   const bookTitles = sanitizeBookTitles(result.bookTitles);
-  const finalTitle = formatMarketingComboProductTitle(comboName, bookTitles);
+  const finalTitle = appendProductVariantAttributes(formatMarketingComboProductTitle(comboName, bookTitles), product.title);
   if (!finalTitle) {
     throw new AppError("Không tạo được tên combo sau khi AI trả kết quả", "COMBO_TITLE_FORMAT_FAILED");
   }

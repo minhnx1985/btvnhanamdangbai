@@ -87,6 +87,97 @@ function removeBracketedText(value: string): string {
   return next;
 }
 
+function extractLeadingBracketedText(value: string): { prefix: string; rest: string } | null {
+  const match =
+    value.match(/^\s*\(([^()]+)\)\s*(.+)$/u) ??
+    value.match(/^\s*\[([^\[\]]+)\]\s*(.+)$/u) ??
+    value.match(/^\s*\{([^{}]+)\}\s*(.+)$/u) ??
+    value.match(/^\s*（([^（）]+)）\s*(.+)$/u) ??
+    value.match(/^\s*【([^【】]+)】\s*(.+)$/u);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    prefix: cleanupTitle(match[1] ?? ""),
+    rest: cleanupTitle(match[2] ?? "")
+  };
+}
+
+function isLikelySeriesPrefix(value: string): boolean {
+  const prefix = cleanupTitle(value);
+  const normalized = removeDiacritics(prefix).toLocaleLowerCase("vi-VN");
+  const words = normalized.match(/[\p{L}\p{N}+]+/gu) ?? [];
+
+  if (words.length < 2 || prefix.length > 80) {
+    return false;
+  }
+
+  if (/\b(?:tb|tai ban|tang|kem|bia|gia|nhanam|nha nam|isbn|sku)\b/u.test(normalized)) {
+    return false;
+  }
+
+  return true;
+}
+
+function restoreLeadingSeriesPrefix(value: string): string | null {
+  const leading = extractLeadingBracketedText(value);
+  if (!leading || !isLikelySeriesPrefix(leading.prefix)) {
+    return null;
+  }
+
+  const rest = cleanupTitle(removePriceText(removeBracketedText(leading.rest)));
+  if (!rest) {
+    return null;
+  }
+
+  return `${leading.prefix}: ${rest}`;
+}
+
+function isProductVariantAttribute(value: string): boolean {
+  const normalized = removeDiacritics(cleanupTitle(value)).toLocaleLowerCase("vi-VN");
+
+  if (!normalized || /\b(?:gia|vnd|isbn|sku|nha nam|nhanam)\b/u.test(normalized)) {
+    return false;
+  }
+
+  return /\b(?:khong kem|khong co|co kem|kem|hop|bia cung|bia mem|ban dac biet|limited)\b/u.test(normalized);
+}
+
+function extractProductVariantAttributes(rawTitle: string): string[] {
+  const attributes: string[] = [];
+  const pattern = /\(([^()]+)\)|\[([^\[\]]+)\]|\{([^{}]+)\}|（([^（）]+)）|【([^【】]+)】/gu;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(rawTitle)) !== null) {
+    const value = cleanupTitle(match.slice(1).find((item) => typeof item === "string" && item.trim().length > 0) ?? "");
+    if (value && isProductVariantAttribute(value)) {
+      attributes.push(value);
+    }
+  }
+
+  return attributes.filter(
+    (attribute, index, values) =>
+      values.findIndex((item) => item.toLocaleLowerCase("vi-VN") === attribute.toLocaleLowerCase("vi-VN")) === index
+  );
+}
+
+function appendProductVariantAttributes(finalTitle: string, rawTitle: string): string {
+  const attributes = extractProductVariantAttributes(rawTitle);
+  if (attributes.length === 0) {
+    return finalTitle;
+  }
+
+  const normalizedFinalTitle = removeDiacritics(finalTitle).toLocaleLowerCase("vi-VN");
+  const suffix = attributes
+    .filter((attribute) => !normalizedFinalTitle.includes(removeDiacritics(attribute).toLocaleLowerCase("vi-VN")))
+    .map((attribute) => `(${attribute.toLocaleUpperCase("vi-VN")})`)
+    .join(" ");
+
+  return suffix ? `${finalTitle} ${suffix}` : finalTitle;
+}
+
 function removePriceText(value: string): string {
   return PRICE_PATTERNS.reduce((result, pattern) => result.replace(pattern, " "), value);
 }
@@ -188,7 +279,9 @@ export function isComboProductTitle(rawTitle: string, alias?: string): boolean {
 }
 
 export function cleanProductTitle(rawTitle: string): string {
-  return removeCatalogPrefix(cleanupTitle(removePriceText(removeBracketedText(rawTitle))));
+  const withSeriesPrefix = restoreLeadingSeriesPrefix(rawTitle);
+  const sourceTitle = withSeriesPrefix ?? removeBracketedText(rawTitle);
+  return removeCatalogPrefix(cleanupTitle(removePriceText(sourceTitle)));
 }
 
 function removeComboPrefix(value: string): string {
@@ -285,8 +378,8 @@ export function normalizeProductTitleForBook(rawTitle: string, options: { alias?
   if (isComboProductTitle(rawTitle, options.alias)) {
     const bookTitles = extractComboBookTitles(rawTitle);
     const fallbackComboName = bookTitles.length > 1 ? bookTitles.join(" - ") : extractComboNameSeed(rawTitle);
-    return formatMarketingComboProductTitle(fallbackComboName, bookTitles);
+    return appendProductVariantAttributes(formatMarketingComboProductTitle(fallbackComboName, bookTitles), rawTitle);
   }
 
-  return cleaned.toLocaleUpperCase("vi-VN");
+  return appendProductVariantAttributes(cleaned.toLocaleUpperCase("vi-VN"), rawTitle);
 }
