@@ -14,6 +14,9 @@ const PRICE_PATTERNS = [
 ];
 
 const BOOKISH_PREFIX_WORDS = new Set([
+  "a",
+  "an",
+  "and",
   "bi",
   "bí",
   "bo",
@@ -31,6 +34,7 @@ const BOOKISH_PREFIX_WORDS = new Set([
   "đời",
   "hieu",
   "hiệu",
+  "how",
   "lich",
   "lịch",
   "mot",
@@ -60,6 +64,11 @@ const BOOKISH_PREFIX_WORDS = new Set([
   "ứng",
   "va",
   "và",
+  "what",
+  "when",
+  "where",
+  "who",
+  "why",
   "voi",
   "với"
 ]);
@@ -255,9 +264,9 @@ export function extractComboNameSeed(rawTitle: string): string {
 }
 
 export function formatMarketingComboProductTitle(comboName: string, bookTitles: string[]): string {
-  const normalizedComboName = cleanComboName(comboName);
+  const normalizedComboName = cleanComboName(comboName).toLocaleUpperCase("vi-VN");
   const normalizedBookTitles = bookTitles
-    .map((title) => cleanupTitle(title))
+    .map((title) => cleanupTitle(title).toLocaleUpperCase("vi-VN"))
     .filter(Boolean);
 
   if (!normalizedComboName) {
@@ -268,7 +277,7 @@ export function formatMarketingComboProductTitle(comboName: string, bookTitles: 
     return `COMBO ${normalizedComboName}`;
   }
 
-  return `COMBO ${normalizedComboName}: ${normalizedBookTitles.join(" - ")} -`;
+  return `COMBO ${normalizedComboName}: ${normalizedBookTitles.join(" - ")}`;
 }
 
 export function normalizeProductTitleForBook(rawTitle: string, options: { alias?: string } = {}): string {
