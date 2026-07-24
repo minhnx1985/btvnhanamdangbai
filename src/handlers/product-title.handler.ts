@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Context } from "telegraf";
 import { canEditProducts } from "../bot/guards";
+import { generateMarketingComboProductTitle } from "../services/ai-combo-title.service";
 import { extractNhanamProductAlias } from "../services/product-url.service";
-import { normalizeProductTitleForBook } from "../services/product-title-normalizer.service";
+import { isComboProductTitle, normalizeProductTitleForBook } from "../services/product-title-normalizer.service";
 import { sapoProductService } from "../services/sapo-product.service";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
@@ -155,7 +156,11 @@ export async function handleNormalizeProductTitleCommand(ctx: Context): Promise<
       return;
     }
 
-    const newTitle = normalizeProductTitleForBook(product.title, { alias });
+    const isCombo = isComboProductTitle(product.title, alias);
+    const newTitle = isCombo
+      ? (await generateMarketingComboProductTitle(product, alias)).finalTitle
+      : normalizeProductTitleForBook(product.title, { alias });
+
     if (!newTitle) {
       await replySafely(ctx, "Không tạo được tên mới sau khi chuẩn hóa. Chưa có thay đổi nào trên Sapo.", {
         userId,
@@ -195,6 +200,7 @@ export async function handleNormalizeProductTitleCommand(ctx: Context): Promise<
       jobId: job.jobId,
       productId: job.productId,
       alias,
+      isCombo,
       oldTitle: job.oldTitle,
       newTitle: job.newTitle
     });

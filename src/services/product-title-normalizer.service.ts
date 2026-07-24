@@ -34,6 +34,7 @@ function removePriceText(value: string): string {
 function cleanupTitle(value: string): string {
   return value
     .replace(/[|]/g, " ")
+    .replace(/\s+[,]+\s*$/g, " ")
     .replace(/\s+[-–—:;,/]+\s*$/g, " ")
     .replace(/^\s*[-–—:;,/]+\s+/g, " ")
     .replace(/\s+[-–—:;,/]+\s+[-–—:;,/]+\s+/g, " ")
@@ -41,36 +42,48 @@ function cleanupTitle(value: string): string {
     .trim();
 }
 
-function isComboProduct(rawTitle: string, alias?: string): boolean {
+export function isComboProductTitle(rawTitle: string, alias?: string): boolean {
   return /^combo(?:\b|[-_])/iu.test(rawTitle.trim()) || /^combo(?:\b|[-_])/iu.test(alias?.trim() ?? "");
+}
+
+export function cleanProductTitle(rawTitle: string): string {
+  return cleanupTitle(removePriceText(removeBracketedText(rawTitle)));
 }
 
 function removeComboPrefix(value: string): string {
   return value
+    .replace(/^\s*combo\s*\+\s*[^:：]+[:：]\s*/iu, "")
     .replace(/^\s*(?:combo sách|combo sach|bộ combo|bo combo|combo)\s*[:：\-–—]?\s*/iu, "")
     .trim();
 }
 
-function splitComboBookTitles(value: string): string[] {
-  return value
+export function extractComboBookTitles(rawTitle: string): string[] {
+  const cleanedTitle = cleanProductTitle(rawTitle);
+  return removeComboPrefix(cleanedTitle)
     .split(/\s+(?:và|va)\s+|\s*[+&]\s*/iu)
     .map((item) => cleanupTitle(item))
     .filter(Boolean);
 }
 
-function formatComboTitle(cleanedTitle: string): string {
-  const titles = splitComboBookTitles(removeComboPrefix(cleanedTitle));
-  const comboName = (titles.length > 0 ? titles : [removeComboPrefix(cleanedTitle)])
-    .map((title) => title.toLocaleUpperCase("vi-VN"))
-    .join(" - ");
+export function formatMarketingComboProductTitle(comboName: string, bookTitles: string[]): string {
+  const normalizedComboName = cleanupTitle(comboName).toLocaleUpperCase("vi-VN");
+  const normalizedBookTitles = bookTitles
+    .map((title) => cleanupTitle(title).toLocaleUpperCase("vi-VN"))
+    .filter(Boolean);
 
-  return comboName ? `COMBO + TÊN COMBO: ${comboName}` : "";
+  if (!normalizedComboName || normalizedBookTitles.length === 0) {
+    return "";
+  }
+
+  return `COMBO + ${normalizedComboName}: ${normalizedBookTitles.join(", ")}`;
 }
 
 export function normalizeProductTitleForBook(rawTitle: string, options: { alias?: string } = {}): string {
-  const cleaned = cleanupTitle(removePriceText(removeBracketedText(rawTitle)));
-  if (isComboProduct(rawTitle, options.alias)) {
-    return formatComboTitle(cleaned);
+  const cleaned = cleanProductTitle(rawTitle);
+  if (isComboProductTitle(rawTitle, options.alias)) {
+    const bookTitles = extractComboBookTitles(rawTitle);
+    const fallbackComboName = bookTitles.length > 1 ? bookTitles.join(" - ") : removeComboPrefix(cleaned);
+    return formatMarketingComboProductTitle(fallbackComboName, bookTitles.length > 0 ? bookTitles : [fallbackComboName]);
   }
 
   return cleaned.toLocaleUpperCase("vi-VN");

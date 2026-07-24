@@ -173,18 +173,26 @@ class SapoProductService {
       await this.client.put<ProductResponse>(`/admin/products/${productId}.json`, {
         product: {
           id: productId,
+          name: title,
           title
         }
       });
       logger.info("sapo_product_title_update_put_ok", { ...logContext, productId });
 
       const updated = await this.getProduct(productId);
-      if (updated?.title !== title) {
+      const updatedRaw = isRecord(updated?.raw) ? updated.raw : {};
+      const updatedTitleCandidates = [
+        updated?.title,
+        typeof updatedRaw.name === "string" ? updatedRaw.name : undefined,
+        typeof updatedRaw.title === "string" ? updatedRaw.title : undefined
+      ];
+      if (!updatedTitleCandidates.includes(title)) {
         logger.error("sapo_product_title_update_verify_failed", {
           ...logContext,
           productId,
           expectedTitle: title,
-          actualTitle: updated?.title ?? ""
+          actualTitle: updated?.title ?? "",
+          actualName: typeof updatedRaw.name === "string" ? updatedRaw.name : ""
         });
         throw new AppError("Sapo returned OK but product.title was not changed", "SAPO_PRODUCT_TITLE_VERIFY_FAILED");
       }
