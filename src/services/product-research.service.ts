@@ -32,6 +32,9 @@ type DuckDuckGoResponse = {
 };
 
 const MAX_RESEARCH_SOURCES = 5;
+const MAX_COMBO_BOOK_TITLES = 4;
+const MAX_COMBO_RESEARCH_SOURCES = 8;
+const MAX_RESEARCH_SOURCES_PER_BOOK = 2;
 
 class ProductResearchService {
   private readonly client: AxiosInstance;
@@ -64,6 +67,27 @@ class ProductResearchService {
     }
 
     return dedupeSources(sources).slice(0, MAX_RESEARCH_SOURCES);
+  }
+
+  async researchComboBooks(bookTitles: string[], product: NormalizedSapoProduct): Promise<ProductResearchSource[]> {
+    const bookSourceGroups = await Promise.all(
+      bookTitles.slice(0, MAX_COMBO_BOOK_TITLES).map(async (bookTitle) => {
+        const querySourceGroups = await Promise.all(
+          buildBookTitleResearchQueries(bookTitle, product).map(async (query) => {
+            const [wikipediaVi, wikipediaEn, duckDuckGo] = await Promise.all([
+              this.searchWikipedia(query, "vi"),
+              this.searchWikipedia(query, "en"),
+              this.searchDuckDuckGo(query)
+            ]);
+            return [...wikipediaVi, ...wikipediaEn, ...duckDuckGo];
+          })
+        );
+
+        return dedupeSources(querySourceGroups.flat()).slice(0, MAX_RESEARCH_SOURCES_PER_BOOK);
+      })
+    );
+
+    return dedupeSources(bookSourceGroups.flat()).slice(0, MAX_COMBO_RESEARCH_SOURCES);
   }
 
   private async searchWikipedia(query: string, language: "vi" | "en"): Promise<ProductResearchSource[]> {
@@ -169,6 +193,18 @@ function buildResearchQueries(product: NormalizedSapoProduct): string[] {
   const queries = [
     [title, author].filter(Boolean).join(" "),
     [title, "sách", author].filter(Boolean).join(" "),
+    [title, tags].filter(Boolean).join(" ")
+  ];
+
+  return [...new Set(queries.map((query) => query.trim()).filter(Boolean))].slice(0, 3);
+}
+
+function buildBookTitleResearchQueries(bookTitle: string, product: NormalizedSapoProduct): string[] {
+  const title = bookTitle.trim();
+  const tags = (product.tags ?? []).slice(0, 2).join(" ");
+  const queries = [
+    [title, "sách"].filter(Boolean).join(" "),
+    [title, "Nhã Nam"].filter(Boolean).join(" "),
     [title, tags].filter(Boolean).join(" ")
   ];
 

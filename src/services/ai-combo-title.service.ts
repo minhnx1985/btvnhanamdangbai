@@ -1,7 +1,8 @@
-import { NormalizedSapoProduct } from "../types/product-seo.types";
+import { NormalizedSapoProduct, ProductResearchSource } from "../types/product-seo.types";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { stripHtml } from "./product-audit.service";
+import { productResearchService } from "./product-research.service";
 import { extractComboBookTitles, formatMarketingComboProductTitle } from "./product-title-normalizer.service";
 import { ShopApiChatMessage, shopApiService } from "./shopapi.service";
 
@@ -31,13 +32,32 @@ function sanitizeComboName(value: unknown): string {
     .trim();
 }
 
-function buildMessages(product: NormalizedSapoProduct, bookTitles: string[]): ShopApiChatMessage[] {
+function compactResearchSources(sources: ProductResearchSource[]): Array<{
+  source: string;
+  title: string;
+  url?: string;
+  summary: string;
+}> {
+  return sources.slice(0, 8).map((source) => ({
+    source: source.source,
+    title: source.title,
+    url: source.url,
+    summary: truncateText(source.summary, 700)
+  }));
+}
+
+function buildMessages(
+  product: NormalizedSapoProduct,
+  bookTitles: string[],
+  researchSources: ProductResearchSource[]
+): ShopApiChatMessage[] {
   return [
     {
       role: "system",
       content: [
         "Bạn là biên tập viên marketing sách của Nhã Nam.",
         "Nhiệm vụ: đặt một tên combo ngắn, hấp dẫn, có tính marketing, dựa hoàn toàn trên dữ liệu được cung cấp.",
+        "Ưu tiên dùng thông tin nội dung sách từ phần researchSources nếu có.",
         "Không bịa thông tin, không thêm giải thưởng, không dùng giọng quá đà.",
         "Tên combo phải là một cụm danh từ/cụm mô tả ngắn, không quá 8 từ.",
         "Không dùng từ COMBO trong comboName.",
@@ -54,6 +74,7 @@ function buildMessages(product: NormalizedSapoProduct, bookTitles: string[]): Sh
         bookTitles,
         productSummary: truncateText(stripHtml(product.summary ?? ""), 1200),
         productDescription: truncateText(stripHtml(product.content ?? ""), 1800),
+        researchSources: compactResearchSources(researchSources),
         tags: product.tags ?? [],
         productType: product.productType,
         vendor: product.vendor
@@ -71,7 +92,17 @@ export async function generateMarketingComboProductTitle(
     throw new AppError("Không tách được tên sách trong combo", "COMBO_BOOK_TITLES_MISSING");
   }
 
-  const result = await shopApiService.generateJson<RawComboTitleResult>(buildMessages(product, bookTitles));
+  const researchStartedAt = Date.now();
+  const researchSources = await productResearchService.researchComboBooks(bookTitles, product);
+  logger.info("combo_book_research_completed", {
+    productId: product.id,
+    alias,
+    bookTitlesCount: bookTitles.length,
+    sourcesCount: researchSources.length,
+    durationMs: Date.now() - researchStartedAt
+  });
+
+  const result = await shopApiService.generateJson<RawComboTitleResult>(buildMessages(product, bookTitles, researchSources));
   const comboName = sanitizeComboName(result.comboName);
   if (!comboName) {
     throw new AppError("AI không trả tên combo hợp lệ", "AI_COMBO_TITLE_INVALID_RESPONSE");

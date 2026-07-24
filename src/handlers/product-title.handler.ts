@@ -157,6 +157,14 @@ export async function handleNormalizeProductTitleCommand(ctx: Context): Promise<
     }
 
     const isCombo = isComboProductTitle(product.title, alias);
+    if (isCombo) {
+      await replySafely(ctx, "Đây là sản phẩm combo. Bot đang search thêm nội dung từng sách rồi mới nhờ AI đặt tên combo...", {
+        userId,
+        alias,
+        productId: product.id
+      });
+    }
+
     const newTitle = isCombo
       ? (await generateMarketingComboProductTitle(product, alias)).finalTitle
       : normalizeProductTitleForBook(product.title, { alias });
