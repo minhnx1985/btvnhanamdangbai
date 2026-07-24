@@ -13,6 +13,57 @@ const PRICE_PATTERNS = [
   /\b\d+\s*(?:đ|₫|vnd|vnđ|k)\b/giu
 ];
 
+const BOOKISH_PREFIX_WORDS = new Set([
+  "bi",
+  "bí",
+  "bo",
+  "bộ",
+  "cau",
+  "câu",
+  "chuyen",
+  "chuyện",
+  "con",
+  "cuoc",
+  "cuộc",
+  "cua",
+  "của",
+  "doi",
+  "đời",
+  "hieu",
+  "hiệu",
+  "lich",
+  "lịch",
+  "mot",
+  "một",
+  "nghe",
+  "nghệ",
+  "nguoi",
+  "người",
+  "nha",
+  "nhà",
+  "nhung",
+  "những",
+  "sach",
+  "sách",
+  "su",
+  "sự",
+  "the",
+  "thế",
+  "thuat",
+  "thuật",
+  "tieu",
+  "tiểu",
+  "trong",
+  "truyen",
+  "truyện",
+  "ung",
+  "ứng",
+  "va",
+  "và",
+  "voi",
+  "với"
+]);
+
 function removeBracketedText(value: string): string {
   let next = value;
   let previous = "";
@@ -42,12 +93,66 @@ function cleanupTitle(value: string): string {
     .trim();
 }
 
+function removeDiacritics(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+}
+
+function isUppercaseWord(word: string): boolean {
+  return word === word.toLocaleUpperCase("vi-VN");
+}
+
+function isCapitalizedWord(word: string): boolean {
+  const firstLetter = word.match(/\p{L}/u)?.[0];
+  return !!firstLetter && firstLetter === firstLetter.toLocaleUpperCase("vi-VN");
+}
+
+function isLikelyAuthorPrefix(value: string): boolean {
+  if (/[0-9,!?;:]/u.test(value)) {
+    return false;
+  }
+
+  const words = value.match(/[\p{L}.]+/gu) ?? [];
+  if (words.length < 2 || words.length > 5) {
+    return false;
+  }
+
+  const normalizedWords = words.map((word) => removeDiacritics(word).toLocaleLowerCase("vi-VN").replace(/\./g, ""));
+  if (normalizedWords.some((word) => BOOKISH_PREFIX_WORDS.has(word))) {
+    return false;
+  }
+
+  return words.every((word) => isCapitalizedWord(word) || isUppercaseWord(word));
+}
+
+function removeCatalogPrefix(value: string): string {
+  const withoutBookLabel = value.replace(/^\s*(?:sách|sach|book)\s*[:：\-–—]\s*/iu, "");
+  const parts = withoutBookLabel
+    .split(/\s+[-–—]\s+/u)
+    .map((part) => cleanupTitle(part))
+    .filter(Boolean);
+
+  if (parts.length < 2) {
+    return cleanupTitle(withoutBookLabel);
+  }
+
+  const [prefix, ...rest] = parts;
+  if (isLikelyAuthorPrefix(prefix)) {
+    return cleanupTitle(rest.join(" - "));
+  }
+
+  return cleanupTitle(withoutBookLabel);
+}
+
 export function isComboProductTitle(rawTitle: string, alias?: string): boolean {
   return /^combo(?:\b|[-_])/iu.test(rawTitle.trim()) || /^combo(?:\b|[-_])/iu.test(alias?.trim() ?? "");
 }
 
 export function cleanProductTitle(rawTitle: string): string {
-  return cleanupTitle(removePriceText(removeBracketedText(rawTitle)));
+  return removeCatalogPrefix(cleanupTitle(removePriceText(removeBracketedText(rawTitle))));
 }
 
 function removeComboPrefix(value: string): string {
@@ -61,7 +166,7 @@ export function extractComboBookTitles(rawTitle: string): string[] {
   const cleanedTitle = cleanProductTitle(rawTitle);
   return removeComboPrefix(cleanedTitle)
     .split(/\s+(?:và|va)\s+|\s*[+&]\s*/iu)
-    .map((item) => cleanupTitle(item))
+    .map((item) => removeCatalogPrefix(cleanupTitle(item)))
     .filter(Boolean);
 }
 
