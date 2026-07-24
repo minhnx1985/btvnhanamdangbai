@@ -8,7 +8,7 @@ export const messages = {
     "- /blog: tạo bài vào danh mục Blog",
     "- /author: tạo bài ở mục Tác giả",
     "- /seo <url>: tối ưu SEO & marketing cho sản phẩm Nhã Nam",
-    "- /sp <url>: chuẩn hóa tên sản phẩm sách trước khi sửa trên Sapo",
+    "- /s <url>: chuẩn hóa tên sản phẩm sách trước khi sửa trên Sapo",
     "- /cancel: hủy thao tác hiện tại",
     "",
     "Flow blog thường:",

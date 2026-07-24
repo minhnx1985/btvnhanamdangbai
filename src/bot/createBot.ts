@@ -44,7 +44,7 @@ export function createBot(): Telegraf<Context> {
   bot.command("author", handleAuthor);
   bot.command("cancel", handleCancel);
   bot.command("seo", handleSeoCommand);
-  bot.command("sp", handleNormalizeProductTitleCommand);
+  bot.command("s", handleNormalizeProductTitleCommand);
   bot.command("inspectproduct", handleInspectProductCommand);
   bot.command("testupdate", handleTestUpdateCommand);
   bot.on("callback_query", async (ctx) => {

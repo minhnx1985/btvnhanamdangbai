@@ -126,7 +126,7 @@ function formatFriendlyError(error: unknown): string {
 export async function handleNormalizeProductTitleCommand(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
   if (!userId) {
-    await replySafely(ctx, "Vui lòng dùng: /sp https://nhanam.vn/<alias>");
+    await replySafely(ctx, "Vui lòng dùng: /s https://nhanam.vn/<alias>");
     return;
   }
 
@@ -141,7 +141,7 @@ export async function handleNormalizeProductTitleCommand(ctx: Context): Promise<
   const alias = extractNhanamProductAlias(productUrl);
 
   if (!alias) {
-    await replySafely(ctx, "URL không hợp lệ. Vui lòng dùng: /sp https://nhanam.vn/<alias>", { userId });
+    await replySafely(ctx, "URL không hợp lệ. Vui lòng dùng: /s https://nhanam.vn/<alias>", { userId });
     return;
   }
 
@@ -151,7 +151,7 @@ export async function handleNormalizeProductTitleCommand(ctx: Context): Promise<
 
     const product = await sapoProductService.findProductByAlias(alias);
     if (!product || !product.id || !product.title) {
-      logger.warn("sapo_product_not_found", { userId, alias, command: "sp" });
+      logger.warn("sapo_product_not_found", { userId, alias, command: "s" });
       await replySafely(ctx, "Không tìm thấy sản phẩm tương ứng trong Sapo.", { userId, alias });
       return;
     }
