@@ -140,6 +140,8 @@ Luu y:
 - `/start`: Gioi thieu bot va huong dan su dung
 - `/newpost`: Bat dau tao bai viet moi
 - `/seo <url>`: Phan tich va de xuat toi uu SEO/marketing cho san pham Nha Nam
+- `/s <url>`: Chuan hoa ten san pham sach truoc khi sua tren Sapo
+- `/s1 <url>`: Chuan hoa title chinh va them mot dong title phu marketing
 - `/cancel`: Huy thao tac hien tai
 
 ## Flow su dung

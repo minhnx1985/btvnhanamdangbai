@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { Context } from "telegraf";
 import { canEditProducts } from "../bot/guards";
 import { generateMarketingComboProductTitle } from "../services/ai-combo-title.service";
+import { generateMarketingSubtitle } from "../services/ai-product-subtitle.service";
 import { extractNhanamProductAlias } from "../services/product-url.service";
 import { isComboProductTitle, normalizeProductTitleForBook } from "../services/product-title-normalizer.service";
+import { NormalizedSapoProduct } from "../types/product-seo.types";
 import { sapoProductService } from "../services/sapo-product.service";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
@@ -102,6 +104,10 @@ async function replyWithButtonsSafely(
 
 function buildProductUrl(alias: string): string {
   return `https://nhanam.vn/${alias}`;
+}
+
+function readPrimaryTitle(title: string): string {
+  return title.split(/\r?\n/)[0]?.trim() || title.trim();
 }
 
 function buildConfirmButtons(jobId: string): InlineKeyboardButton[][] {
@@ -236,6 +242,116 @@ export async function handleNormalizeProductTitleCommand(ctx: Context): Promise<
     const reason = formatFriendlyError(error);
     logger.error("product_title_normalize_failed", { userId, alias, reason });
     await replySafely(ctx, `Không chuẩn hóa được tên sản phẩm: ${reason}`, { userId, alias });
+  }
+}
+
+async function buildNormalizedMainTitle(product: NormalizedSapoProduct, alias: string): Promise<string> {
+  const primaryProductTitle = readPrimaryTitle(product.title);
+  const isCombo = isComboProductTitle(primaryProductTitle, alias);
+
+  return isCombo
+    ? (await generateMarketingComboProductTitle({ ...product, title: primaryProductTitle }, alias)).finalTitle
+    : normalizeProductTitleForBook(primaryProductTitle, { alias });
+}
+
+export async function handleMarketingSubtitleTitleCommand(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+  if (!userId) {
+    await replySafely(ctx, "Vui lòng dùng: /s1 https://nhanam.vn/<alias>");
+    return;
+  }
+
+  if (!canEditProducts(userId)) {
+    logger.warn("product_title_edit_forbidden", { userId });
+    await replySafely(ctx, PRODUCT_EDIT_FORBIDDEN_MESSAGE, { userId });
+    return;
+  }
+
+  const commandText = getMessageText(ctx);
+  const productUrl = commandText.split(/\s+/).slice(1).join(" ").trim();
+  const alias = extractNhanamProductAlias(productUrl);
+
+  if (!alias) {
+    await replySafely(ctx, "URL không hợp lệ. Vui lòng dùng: /s1 https://nhanam.vn/<alias>", { userId });
+    return;
+  }
+
+  try {
+    logger.info("product_marketing_subtitle_started", { userId, alias });
+    await replySafely(ctx, "Đang tìm sản phẩm, chuẩn hóa title chính và tạo title phụ marketing...", { userId, alias });
+
+    const product = await sapoProductService.findProductByAlias(alias);
+    if (!product || !product.id || !product.title) {
+      logger.warn("sapo_product_not_found", { userId, alias, command: "s1" });
+      await replySafely(ctx, "Không tìm thấy sản phẩm tương ứng trong Sapo.", { userId, alias });
+      return;
+    }
+
+    const mainTitle = await buildNormalizedMainTitle(product, alias);
+    const subtitle = await generateMarketingSubtitle({
+      product,
+      mainTitle,
+      alias
+    });
+    const newTitle = [mainTitle, subtitle.toLocaleUpperCase("vi-VN")].join("\n");
+
+    if (newTitle === product.title) {
+      await replySafely(
+        ctx,
+        [
+          "Tên sản phẩm đã có title phụ đúng chuẩn, chưa cần sửa.",
+          "",
+          `Tên hiện tại: ${product.title}`,
+          buildProductUrl(alias)
+        ].join("\n"),
+        { userId, alias, productId: product.id }
+      );
+      return;
+    }
+
+    const job: ProductTitleUpdateJob = {
+      jobId: randomUUID(),
+      userId,
+      productId: product.id,
+      alias,
+      oldTitle: product.title,
+      newTitle,
+      createdAt: Date.now()
+    };
+
+    saveProductTitleUpdateJob(job);
+    logger.info("product_marketing_subtitle_pending_created", {
+      userId,
+      jobId: job.jobId,
+      productId: job.productId,
+      alias,
+      oldTitle: job.oldTitle,
+      newTitle: job.newTitle
+    });
+
+    await replyWithButtonsSafely(
+      ctx,
+      [
+        "Đã tạo title phụ marketing:",
+        "",
+        `ID: ${job.productId}`,
+        `Alias: ${job.alias}`,
+        "",
+        "Tên hiện tại:",
+        job.oldTitle,
+        "",
+        "Tên sau chuẩn hóa:",
+        job.newTitle,
+        "",
+        "Bạn có đồng ý sửa tên sản phẩm trên Sapo không?"
+      ].join("\n"),
+      buildConfirmButtons(job.jobId),
+      { userId, jobId: job.jobId, productId: job.productId, alias }
+    );
+  } catch (error) {
+    const reason = formatFriendlyError(error);
+    logger.error("product_marketing_subtitle_failed", { userId, alias, reason });
+    await replySafely(ctx, `Không tạo được title phụ marketing: ${reason}`, { userId, alias });
   }
 }
 

@@ -9,6 +9,7 @@ export const messages = {
     "- /author: tạo bài ở mục Tác giả",
     "- /seo <url>: tối ưu SEO & marketing cho sản phẩm Nhã Nam",
     "- /s <url>: chuẩn hóa tên sản phẩm sách trước khi sửa trên Sapo",
+    "- /s1 <url>: thêm title phụ marketing sau title chính sản phẩm",
     "- /cancel: hủy thao tác hiện tại",
     "",
     "Flow blog thường:",
