@@ -110,6 +110,214 @@ function readPrimaryTitle(title: string): string {
   return title.split(/\r?\n/)[0]?.trim() || title.trim();
 }
 
+type ProductTitleParts = {
+  mainSourceTitle: string;
+  existingSubtitle: string | null;
+};
+
+const SUBTITLE_WORDS = new Set([
+  "a",
+  "an",
+  "anh",
+  "ban",
+  "bi",
+  "bo",
+  "cam",
+  "cau",
+  "cho",
+  "chuyen",
+  "con",
+  "cuoc",
+  "cua",
+  "doi",
+  "dich",
+  "du",
+  "duy",
+  "guide",
+  "hanh",
+  "het",
+  "hieu",
+  "hoc",
+  "journey",
+  "lam",
+  "lich",
+  "memoir",
+  "mot",
+  "nghe",
+  "ngon",
+  "novel",
+  "nguoi",
+  "nha",
+  "nhung",
+  "song",
+  "story",
+  "su",
+  "tam",
+  "the",
+  "thuat",
+  "tien",
+  "tinh",
+  "tri",
+  "trong",
+  "truyen",
+  "tu",
+  "va",
+  "ve",
+  "voi",
+  "what",
+  "when",
+  "where",
+  "who",
+  "why",
+  "works"
+]);
+
+function compactTitleText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function removeDiacritics(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+}
+
+function isProductVariantAttribute(value: string): boolean {
+  const normalized = removeDiacritics(compactTitleText(value)).toLocaleLowerCase("vi-VN");
+
+  if (!normalized || /\b(?:gia|vnd|isbn|sku|nha nam|nhanam|tb)\b/u.test(normalized)) {
+    return false;
+  }
+
+  return /\b(?:khong kem|khong co|co kem|kem|hop|bia cung|bia mem|ban dac biet|limited)\b/u.test(normalized);
+}
+
+function extractProductVariantAttributeText(rawTitle: string): string {
+  const attributes: string[] = [];
+  const pattern = /\(([^()]+)\)|\[([^\[\]]+)\]|\{([^{}]+)\}|（([^（）]+)）|【([^【】]+)】/gu;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(rawTitle)) !== null) {
+    const attribute = compactTitleText(match.slice(1).find((item) => typeof item === "string" && item.trim()) ?? "");
+    if (attribute && isProductVariantAttribute(attribute)) {
+      attributes.push(`(${attribute})`);
+    }
+  }
+
+  return attributes
+    .filter(
+      (attribute, index, values) =>
+        values.findIndex((item) => item.toLocaleLowerCase("vi-VN") === attribute.toLocaleLowerCase("vi-VN")) === index
+    )
+    .join(" ");
+}
+
+function stripNonVariantBracketedText(value: string): string {
+  return compactTitleText(
+    value.replace(/\(([^()]+)\)|\[([^\[\]]+)\]|\{([^{}]+)\}|（([^（）]+)）|【([^【】]+)】/gu, (match, ...groups) => {
+      const attribute = compactTitleText(groups.find((item) => typeof item === "string" && item.trim()) ?? "");
+      return isProductVariantAttribute(attribute) ? match : " ";
+    })
+  );
+}
+
+function isCapitalizedOrUppercaseWord(word: string): boolean {
+  const firstLetter = word.match(/\p{L}/u)?.[0];
+  return !!firstLetter && firstLetter === firstLetter.toLocaleUpperCase("vi-VN");
+}
+
+function looksLikeAuthorSuffix(value: string): boolean {
+  if (!/^[A-Za-z.'\-\s]+$/.test(value.trim())) {
+    return false;
+  }
+
+  const words = value.match(/[\p{L}.]+/gu) ?? [];
+  if (words.length < 2 || words.length > 5) {
+    return false;
+  }
+
+  const normalizedWords = words.map((word) => removeDiacritics(word).toLocaleLowerCase("vi-VN").replace(/\./g, ""));
+  if (normalizedWords.some((word) => SUBTITLE_WORDS.has(word))) {
+    return false;
+  }
+
+  return words.every(isCapitalizedOrUppercaseWord);
+}
+
+function looksLikeExistingSubtitle(value: string): boolean {
+  const subtitle = stripNonVariantBracketedText(value);
+  if (!subtitle || looksLikeAuthorSuffix(subtitle)) {
+    return false;
+  }
+
+  const normalizedWords = removeDiacritics(subtitle).toLocaleLowerCase("vi-VN").match(/[\p{L}\p{N}]+/gu) ?? [];
+  const normalizedText = normalizedWords.join(" ");
+  if (/\b(?:tb|tai ban|gia|vnd|isbn|sku)\b/u.test(normalizedText) || /^\d/.test(normalizedText)) {
+    return false;
+  }
+
+  return normalizedWords.length >= 2 && (normalizedWords.some((word) => SUBTITLE_WORDS.has(word)) || /[,;:]/u.test(subtitle));
+}
+
+function cleanExistingSubtitle(value: string): string | null {
+  const subtitle = stripNonVariantBracketedText(value);
+  if (!subtitle || looksLikeAuthorSuffix(subtitle)) {
+    return null;
+  }
+
+  return subtitle;
+}
+
+function withOriginalProductAttributes(mainSourceTitle: string, rawTitle: string): string {
+  const attributes = extractProductVariantAttributeText(rawTitle);
+  return attributes ? `${mainSourceTitle} ${attributes}` : mainSourceTitle;
+}
+
+function readProductTitleParts(title: string, alias: string): ProductTitleParts {
+  const lines = title
+    .split(/\r?\n/)
+    .map((line) => compactTitleText(line))
+    .filter(Boolean);
+
+  if (lines.length >= 2) {
+    return {
+      mainSourceTitle: withOriginalProductAttributes(lines[0] ?? title, title),
+      existingSubtitle: cleanExistingSubtitle(lines.slice(1).join(" - "))
+    };
+  }
+
+  const primaryTitle = readPrimaryTitle(title);
+  if (isComboProductTitle(primaryTitle, alias)) {
+    return {
+      mainSourceTitle: primaryTitle,
+      existingSubtitle: null
+    };
+  }
+
+  const parts = primaryTitle
+    .split(/\s+[-–—]\s+/u)
+    .map((part) => compactTitleText(part))
+    .filter(Boolean);
+
+  if (parts.length === 2 && looksLikeExistingSubtitle(parts[1] ?? "")) {
+    return {
+      mainSourceTitle: withOriginalProductAttributes(parts[0] ?? primaryTitle, title),
+      existingSubtitle: cleanExistingSubtitle(parts[1] ?? "")
+    };
+  }
+
+  return {
+    mainSourceTitle: primaryTitle,
+    existingSubtitle: null
+  };
+}
+
+function formatTitleWithSubtitle(mainTitle: string, subtitle: string): string {
+  return `${compactTitleText(mainTitle)} - ${compactTitleText(subtitle).toLocaleUpperCase("vi-VN")}`;
+}
+
 function buildConfirmButtons(jobId: string): InlineKeyboardButton[][] {
   return [
     [{ text: "Đồng ý sửa", callback_data: `sp_confirm:${jobId}` }],
@@ -245,8 +453,12 @@ export async function handleNormalizeProductTitleCommand(ctx: Context): Promise<
   }
 }
 
-async function buildNormalizedMainTitle(product: NormalizedSapoProduct, alias: string): Promise<string> {
-  const primaryProductTitle = readPrimaryTitle(product.title);
+async function buildNormalizedMainTitle(
+  product: NormalizedSapoProduct,
+  alias: string,
+  sourceTitle = readPrimaryTitle(product.title)
+): Promise<string> {
+  const primaryProductTitle = sourceTitle;
   const isCombo = isComboProductTitle(primaryProductTitle, alias);
 
   return isCombo
@@ -278,7 +490,7 @@ export async function handleMarketingSubtitleTitleCommand(ctx: Context): Promise
 
   try {
     logger.info("product_marketing_subtitle_started", { userId, alias });
-    await replySafely(ctx, "Đang tìm sản phẩm, chuẩn hóa title chính và tạo title phụ marketing...", { userId, alias });
+    await replySafely(ctx, "Đang tìm sản phẩm, chuẩn hóa title chính và kiểm tra title phụ marketing...", { userId, alias });
 
     const product = await sapoProductService.findProductByAlias(alias);
     if (!product || !product.id || !product.title) {
@@ -287,13 +499,16 @@ export async function handleMarketingSubtitleTitleCommand(ctx: Context): Promise
       return;
     }
 
-    const mainTitle = await buildNormalizedMainTitle(product, alias);
-    const subtitle = await generateMarketingSubtitle({
-      product,
-      mainTitle,
-      alias
-    });
-    const newTitle = [mainTitle, subtitle.toLocaleUpperCase("vi-VN")].join("\n");
+    const titleParts = readProductTitleParts(product.title, alias);
+    const mainTitle = await buildNormalizedMainTitle(product, alias, titleParts.mainSourceTitle);
+    const subtitle =
+      titleParts.existingSubtitle ??
+      (await generateMarketingSubtitle({
+        product,
+        mainTitle,
+        alias
+      }));
+    const newTitle = formatTitleWithSubtitle(mainTitle, subtitle);
 
     if (newTitle === product.title) {
       await replySafely(
