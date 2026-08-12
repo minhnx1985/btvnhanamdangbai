@@ -5,6 +5,7 @@ import { messages } from "../bot/messages";
 import { getSession, resetSession, setSession } from "../bot/sessionStore";
 import { formatArticleContentHtml } from "../services/content.service";
 import { detectDraftIntake } from "../services/draft-intake.service";
+import { googleDisplayAdsHandoffService } from "../services/google-display-ads-handoff.service";
 import { clearProductLinkAutoSkip } from "../services/product-link-autoskip.service";
 import { sapoService } from "../services/sapo.service";
 import { shopApiService } from "../services/shopapi.service";
@@ -232,6 +233,34 @@ export async function submitDraftPost(
     }
 
     await replySafely(ctx, lines.join("\n"), { userId, postType: input.postType, articleId: result.id, url: result.url ?? "" });
+
+    if (shouldPublishImmediately && input.postType === "site_blog" && result.url) {
+      void googleDisplayAdsHandoffService
+        .notifyBlogPublished({
+          articleId: result.id,
+          title: result.title,
+          url: result.url,
+          blogName,
+          tags
+        })
+        .then((adsHandoff) => {
+          logger.info("blog_ads_handoff_completed", {
+            userId,
+            articleId: result.id,
+            sent: adsHandoff.sent,
+            channel: adsHandoff.channel ?? "",
+            reason: adsHandoff.reason ?? ""
+          });
+        })
+        .catch((error: unknown) => {
+          const reason = error instanceof Error ? error.message : "Unknown ads handoff error";
+          logger.warn("blog_ads_handoff_unhandled_failure", {
+            userId,
+            articleId: result.id,
+            reason
+          });
+        });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lỗi hệ thống, vui lòng thử lại";
     logger.error(shouldPublishImmediately ? "publish article fail" : "create draft fail", {
