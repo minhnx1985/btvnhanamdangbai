@@ -69,6 +69,9 @@ export const config = {
   shopApiBaseUrl: process.env.SHOPAPI_BASE_URL?.trim().replace(/\/$/, "") || "https://api.shopaikey.com/v1",
   shopApiKey: process.env.SHOPAPI_API_KEY?.trim() || "",
   shopApiModel: process.env.SHOPAPI_MODEL?.trim() || "gpt-4o-mini",
+  googleDisplayAdsWebhookUrl: process.env.GOOGLE_DISPLAY_ADS_WEBHOOK_URL?.trim() || "",
+  googleDisplayAdsBotToken: process.env.GOOGLE_DISPLAY_ADS_BOT_TOKEN?.trim() || "",
+  googleDisplayAdsChatId: process.env.GOOGLE_DISPLAY_ADS_CHAT_ID?.trim() || "",
   allowedUserIds: parseAllowedUserIds(process.env.BOT_ALLOWED_USER_IDS)
 } as const;
 
